@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 0.5rem;
+  }
+}
+
+/* MowList Brand Colors */
+@layer utilities {
+  .text-mow-green {
+    color: #22C55E;
+  }
+
+  .bg-mow-green {
+    background-color: #22C55E;
+  }
+
+  .bg-mow-green-50 {
+    background-color: #F0FDF4;
+  }
+
+  .bg-mow-green-100 {
+    background-color: #DCFCE7;
+  }
+
+  .hover\:bg-mow-green-600:hover {
+    background-color: #16A34A;
+  }
+
+  .hover\:text-mow-green-600:hover {
+    color: #16A34A;
+  }
+
+  .text-mow-blue {
+    color: #1E40AF;
+  }
+
+  .bg-mow-blue {
+    background-color: #1E40AF;
+  }
+
+  .bg-mow-blue-50 {
+    background-color: #EFF6FF;
+  }
+
+  .hover\:bg-mow-blue-700:hover {
+    background-color: #1E3A8A;
+  }
+
+  .text-mow-orange {
+    color: #F97316;
+  }
+
+  .bg-mow-orange {
+    background-color: #F97316;
+  }
+
+  .hover\:bg-mow-orange-600:hover {
+    background-color: #EA580C;
+  }
+}
+
+/* Base styles */
+img {
+  object-position: top;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+/* Mobile container adjustments */
+@media (max-width: 768px) {
+  .container {
+    max-width: 100%;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
