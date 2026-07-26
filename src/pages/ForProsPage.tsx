@@ -119,6 +119,12 @@ export default function ForProsPage() {
           >
             Apply Now <ArrowRight size={20} />
           </Link>
+          <p className="text-slate-500 mt-4 text-sm">
+            Already a pro?{' '}
+            <Link to="/login/pro" className="text-[#22C55E] font-semibold hover:underline">
+              Sign in to your dashboard
+            </Link>
+          </p>
         </div>
       </div>
     </div>

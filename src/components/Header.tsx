@@ -81,9 +81,31 @@ export default function Header() {
               </>
             ) : (
               <>
-                <Link to="/login/customer" className="text-slate-600 hover:text-[#22C55E] transition-colors font-medium">
-                  Log In
-                </Link>
+                <details className="relative group">
+                  <summary className="list-none cursor-pointer text-slate-600 hover:text-[#22C55E] transition-colors font-medium flex items-center gap-1">
+                    Log In
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" className="transition-transform group-open:rotate-180">
+                      <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </summary>
+                  <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-lg border border-slate-100 py-2 z-50">
+                    <Link
+                      to="/login/customer"
+                      className="block px-4 py-2.5 hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="font-medium text-slate-900 text-sm">I'm a customer</div>
+                      <div className="text-xs text-slate-500">Book lawn care for my home</div>
+                    </Link>
+                    <div className="border-t border-slate-100 my-1" />
+                    <Link
+                      to="/login/pro"
+                      className="block px-4 py-2.5 hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="font-medium text-slate-900 text-sm">I'm a lawn pro</div>
+                      <div className="text-xs text-slate-500">Sign in to my pro dashboard</div>
+                    </Link>
+                  </div>
+                </details>
                 <Link
                   to="/book"
                   className="bg-[#22C55E] text-white px-5 py-2.5 rounded-lg font-medium hover:bg-[#16A34A] transition-colors"
@@ -163,13 +185,22 @@ export default function Header() {
                   </>
                 ) : (
                   <>
-                    <Link
-                      to="/login/customer"
-                      className="text-slate-600 hover:text-[#22C55E] transition-colors font-medium text-center"
-                      onClick={() => setIsMenuOpen(false)}
-                    >
-                      Log In
-                    </Link>
+                    <div className="flex flex-col space-y-1">
+                      <Link
+                        to="/login/customer"
+                        className="text-slate-600 hover:text-[#22C55E] transition-colors font-medium text-center py-2"
+                        onClick={() => setIsMenuOpen(false)}
+                      >
+                        Log In (Customer)
+                      </Link>
+                      <Link
+                        to="/login/pro"
+                        className="text-slate-600 hover:text-[#22C55E] transition-colors font-medium text-center py-2"
+                        onClick={() => setIsMenuOpen(false)}
+                      >
+                        Log In (Lawn Pro)
+                      </Link>
+                    </div>
                     <Link
                       to="/book"
                       className="bg-[#22C55E] text-white px-5 py-2.5 rounded-lg font-medium hover:bg-[#16A34A] transition-colors text-center"

@@ -334,6 +334,36 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* For Pros Banner */}
+      <section className="py-12 bg-gradient-to-r from-[#1E40AF] to-blue-700">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="text-center md:text-left">
+              <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">
+                Are you a lawn care pro?
+              </h2>
+              <p className="text-blue-100 text-lg">
+                Grow your business. Set your own schedule. Get paid weekly.
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Link
+                to="/signup/pro"
+                className="bg-[#22C55E] text-white px-6 py-3 rounded-lg font-semibold hover:bg-[#16A34A] transition-colors text-center whitespace-nowrap"
+              >
+                Start Earning
+              </Link>
+              <Link
+                to="/login/pro"
+                className="bg-white/10 backdrop-blur text-white border border-white/30 px-6 py-3 rounded-lg font-semibold hover:bg-white/20 transition-colors text-center whitespace-nowrap"
+              >
+                I'm Already a Pro
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* How It Works */}
       <section className="py-20 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
