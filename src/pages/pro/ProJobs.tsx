@@ -22,6 +22,7 @@ export default function ProJobs() {
   const [isAvailable, setIsAvailable] = useState(true)
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [debugInfo, setDebugInfo] = useState<string | null>(null)
 
   useEffect(() => {
     if (user) fetchJobs()
@@ -30,17 +31,27 @@ export default function ProJobs() {
   const fetchJobs = async () => {
     if (!user) return
     setLoading(true)
+    setDebugInfo(null)
     try {
       const [availRes, assignedRes] = await Promise.all([
         getAvailableJobsWithDetails(),
         getProAssignedJobsWithDetails(user.id),
       ])
-      if (availRes.error) console.error('Error loading available jobs:', availRes.error)
-      if (assignedRes.error) console.error('Error loading assigned jobs:', assignedRes.error)
+      if (availRes.error) {
+        console.error('Error loading available jobs:', availRes.error)
+        setDebugInfo(`AVAILABLE ERROR: ${availRes.error.message || JSON.stringify(availRes.error)}`)
+      } else {
+        console.log('Available jobs loaded:', availRes.data?.length || 0)
+        setDebugInfo(`LOADED: available=${availRes.data?.length || 0} assigned=${assignedRes.data?.length || 0} | pro user.id=${user.id} | pro role=${user.role}`)
+      }
+      if (assignedRes.error) {
+        console.error('Error loading assigned jobs:', assignedRes.error)
+      }
       setAvailableJobs(availRes.data || [])
       setAssignedJobs(assignedRes.data || [])
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching jobs:', error)
+      setDebugInfo(`CATCH: ${error?.message || String(error)}`)
     } finally {
       setLoading(false)
     }
@@ -142,6 +153,13 @@ export default function ProJobs() {
 
   return (
     <div className="p-4 md:p-6">
+      {/* Debug info — temporary */}
+      {debugInfo && (
+        <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-3 mb-4 text-xs font-mono text-slate-700 break-all">
+          <strong className="text-yellow-900">DEBUG:</strong> {debugInfo}
+        </div>
+      )}
+
       {/* Toast */}
       {toast && (
         <div
