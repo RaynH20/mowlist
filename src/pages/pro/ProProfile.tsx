@@ -1,441 +1,474 @@
-import { useState } from 'react'
-import { User, Star, CheckCircle, AlertCircle, MapPin, DollarSign, CreditCard, Shield, Settings, Bell, Phone, Mail, Clock, Wrench, Car, Calendar, Edit2, Plus, X, ChevronRight } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import {
+  User, Save, Loader2, CheckCircle, Camera, Phone, FileText,
+  MapPin, Briefcase, Plus, X, Award
+} from 'lucide-react'
+import { useAuth } from '../../lib/auth-context'
+import { getProviderProfile, updateProviderProfile } from '../../lib/api'
+import {
+  getProSkills, setProSkill, removeProSkill,
+} from '../../lib/proDashboard'
+import { supabase } from '../../lib/supabase'
+
+interface ProSkill {
+  service_key: string
+  years_experience: number
+  is_active: boolean
+  display_name: string
+}
+
+const SERVICE_CATALOG = [
+  { key: 'lawn_mowing', name: 'Lawn Mowing', icon: '🌱' },
+  { key: 'edging', name: 'Edging', icon: '✂️' },
+  { key: 'leaf_blowing', name: 'Leaf Blowing', icon: '🍂' },
+  { key: 'hedge_trimming', name: 'Hedge Trimming', icon: '🌳' },
+  { key: 'fertilization', name: 'Fertilization', icon: '🌾' },
+  { key: 'weed_control', name: 'Weed Control', icon: '🌿' },
+  { key: 'aeration', name: 'Lawn Aeration', icon: '💨' },
+  { key: 'mulching', name: 'Mulching', icon: '🪴' },
+]
 
 export default function ProProfile() {
+  const { user } = useAuth()
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+
   const [profile, setProfile] = useState({
-    name: 'Mike Thompson',
-    email: 'mike@example.com',
-    phone: '(512) 555-0123',
-    bio: 'Professional lawn care with 5+ years experience. Specializing in residential properties and small commercial lots. Fast, reliable, and thorough service.',
-    rating: 4.9,
-    reviews: 127,
-    completedJobs: 245,
-    serviceArea: '15 miles from Austin, TX',
-    serviceRadius: 15,
-    serviceCities: ['Austin', 'Round Rock', 'Cedar Park', 'Pflugerville'],
-    isVerified: true,
-    payoutMethod: 'Bank Transfer',
-    payoutEmail: 'mike@email.com',
-    yearsExperience: 5,
-    responseTime: '< 1 hour',
-    equipmentType: 'Commercial',
-    services: ['Lawn Mowing', 'Edging', 'Leaf Removal', 'Trimming'],
-    availability: {
-      monday: true,
-      tuesday: true,
-      wednesday: true,
-      thursday: true,
-      friday: true,
-      saturday: true,
-      sunday: false,
-    },
+    display_name: '',
+    bio: '',
+    phone: '',
+    service_radius_miles: 10,
+    is_available: true,
+    profile_image_url: '',
   })
+  const [originalProfile, setOriginalProfile] = useState(profile)
 
-  const [activeTab, setActiveTab] = useState('overview')
+  const [skills, setSkills] = useState<ProSkill[]>([])
+  const [editingExperience, setEditingExperience] = useState<string | null>(null)
+  const [experienceInput, setExperienceInput] = useState('')
 
-  const onboardingSteps = [
-    { id: 1, title: 'Profile Setup', description: 'Basic info and photo', completed: true },
-    { id: 2, title: 'Service Area', description: 'Set your working radius', completed: true },
-    { id: 3, title: 'Services Offered', description: 'Select services you provide', completed: true },
-    { id: 4, title: 'Payout Details', description: 'Connect payment method', completed: true },
-    { id: 5, title: 'Verification', description: 'ID and background check', completed: true },
-  ]
+  useEffect(() => {
+    if (user) fetchAll()
+  }, [user])
 
-  const verificationItems = [
-    { id: 'identity', title: 'Identity Verification', status: 'verified', icon: Shield },
-    { id: 'background', title: 'Background Check', status: 'verified', icon: CheckCircle },
-    { id: 'insurance', title: 'Insurance', status: 'verified', icon: CheckCircle },
-    { id: 'vehicle', title: 'Vehicle', status: 'pending', icon: Car },
-  ]
+  const fetchAll = async () => {
+    if (!user) return
+    setLoading(true)
+    try {
+      // Provider profile
+      const { data: profileData } = await getProviderProfile(user.id)
+      if (profileData) {
+        setProfile({
+          display_name: profileData.display_name || '',
+          bio: profileData.bio || '',
+          phone: '',
+          service_radius_miles: profileData.service_radius_miles || 10,
+          is_available: profileData.is_available ?? true,
+          profile_image_url: profileData.profile_image_url || '',
+        })
+      }
 
-  const availableServices = [
-    'Lawn Mowing',
-    'Edging',
-    'Leaf Removal',
-    'Trimming',
-    'Aeration',
-    'Fertilization',
-    'Weed Control',
-    'Bush/Hedge Trimming',
-    'Tree Trimming',
-    'Mulching',
-  ]
+      // User phone (separate table)
+      const { data: userData } = await supabase
+        .from('users')
+        .select('phone')
+        .eq('id', user.id)
+        .single()
+      if (userData?.phone) {
+        setProfile((prev) => ({ ...prev, phone: userData.phone || prev.phone }))
+      }
 
-  const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+      // Skills
+      const { data: skillsData } = await getProSkills(user.id)
+      setSkills(skillsData || [])
+    } catch (error) {
+      console.error('Error loading profile:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
 
-  const formatDay = (day: string) => day.charAt(0).toUpperCase() + day.slice(1)
+  const showToast = (type: 'success' | 'error', message: string) => {
+    setToast({ type, message })
+    setTimeout(() => setToast(null), 4000)
+  }
+
+  const hasChanges = JSON.stringify(profile) !== JSON.stringify(originalProfile)
+
+  const handleSave = async () => {
+    if (!user) return
+    setSaving(true)
+    try {
+      // Update provider profile (display name, radius, availability)
+      await updateProviderProfile(user.id, {
+        display_name: profile.display_name,
+        service_radius_miles: profile.service_radius_miles,
+        is_available: profile.is_available,
+      } as any)
+
+      // Update bio + image (separate update since they aren't in the type)
+      await supabase
+        .from('provider_profiles')
+        .update({
+          bio: profile.bio,
+          profile_image_url: profile.profile_image_url,
+        })
+        .eq('user_id', user.id)
+
+      // Update user phone
+      if (profile.phone) {
+        await supabase.from('users').update({ phone: profile.phone }).eq('id', user.id)
+      }
+
+      setOriginalProfile(profile)
+      showToast('success', 'Profile saved!')
+    } catch (error: any) {
+      showToast('error', `Couldn't save: ${error.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleAddSkill = async (serviceKey: string) => {
+    if (!user) return
+    const { error } = await setProSkill(user.id, serviceKey, 0)
+    if (error) {
+      showToast('error', `Couldn't add skill: ${error.message}`)
+      return
+    }
+    const catalog = SERVICE_CATALOG.find(s => s.key === serviceKey)
+    setSkills([...skills, {
+      service_key: serviceKey,
+      years_experience: 0,
+      is_active: true,
+      display_name: catalog?.name || serviceKey,
+    }])
+    showToast('success', 'Skill added!')
+  }
+
+  const handleRemoveSkill = async (serviceKey: string) => {
+    if (!user) return
+    const { error } = await removeProSkill(user.id, serviceKey)
+    if (error) {
+      showToast('error', `Couldn't remove: ${error.message}`)
+      return
+    }
+    setSkills(skills.filter(s => s.service_key !== serviceKey))
+    showToast('success', 'Skill removed')
+  }
+
+  const handleSaveExperience = async (serviceKey: string) => {
+    if (!user) return
+    const years = parseInt(experienceInput) || 0
+    const { error } = await setProSkill(user.id, serviceKey, years)
+    if (error) {
+      showToast('error', `Couldn't save: ${error.message}`)
+      return
+    }
+    setSkills(skills.map(s => s.service_key === serviceKey ? { ...s, years_experience: years } : s))
+    setEditingExperience(null)
+    setExperienceInput('')
+    showToast('success', 'Experience updated')
+  }
+
+  if (loading) {
+    return (
+      <div className="p-4 md:p-6 flex items-center justify-center min-h-[400px]">
+        <Loader2 size={32} className="animate-spin text-[#22C55E]" />
+      </div>
+    )
+  }
+
+  const skillsAdded = new Set(skills.map(s => s.service_key))
+  const availableToAdd = SERVICE_CATALOG.filter(s => !skillsAdded.has(s.key))
 
   return (
-    <div className="p-4 md:p-6">
-      {/* Profile Header */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-6">
-        <div className="flex flex-col sm:flex-row items-center gap-4 mb-6">
-          <div className="relative">
-            <div className="w-24 h-24 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center">
-              <span className="text-white text-3xl font-bold">{profile.name.charAt(0)}</span>
-            </div>
-            <button className="absolute bottom-0 right-0 w-8 h-8 bg-[#22C55E] rounded-full flex items-center justify-center text-white shadow-lg hover:bg-[#16A34A] transition-colors">
-              <Edit2 size={14} />
-            </button>
-          </div>
-          <div className="text-center sm:text-left flex-1">
-            <h2 className="text-xl font-bold text-slate-900">{profile.name}</h2>
-            <p className="text-sm text-slate-500 mt-1">{profile.bio}</p>
-            <div className="flex items-center justify-center sm:justify-start gap-2 mt-2">
-              <Star className="text-yellow-500 fill-current" size={16} />
-              <span className="font-semibold">{profile.rating}</span>
-              <span className="text-slate-500">({profile.reviews} reviews)</span>
-            </div>
-          </div>
-          {profile.isVerified && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-green-50 rounded-full">
-              <CheckCircle className="text-[#22C55E]" size={18} />
-              <span className="text-green-700 font-medium text-sm">Verified Pro</span>
-            </div>
-          )}
+    <div className="p-4 md:p-6 max-w-3xl mx-auto">
+      {toast && (
+        <div
+          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-white font-medium ${
+            toast.type === 'success' ? 'bg-[#22C55E]' : 'bg-red-500'
+          }`}
+        >
+          {toast.message}
         </div>
-
-        {/* Quick Stats */}
-        <div className="grid grid-cols-3 gap-4 pt-4 border-t border-slate-100">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-slate-900">{profile.completedJobs}</div>
-            <div className="text-xs text-slate-500">Jobs Completed</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-slate-900">{profile.rating}</div>
-            <div className="text-xs text-slate-500">Average Rating</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-slate-900">{profile.yearsExperience}+</div>
-            <div className="text-xs text-slate-500">Years Experience</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Tab Navigation */}
-      <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-        {[
-          { id: 'overview', label: 'Overview' },
-          { id: 'services', label: 'Services' },
-          { id: 'availability', label: 'Availability' },
-          { id: 'settings', label: 'Settings' },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${
-              activeTab === tab.id
-                ? 'bg-[#22C55E] text-white'
-                : 'bg-white text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Overview Tab */}
-      {activeTab === 'overview' && (
-        <>
-          {/* Onboarding Progress */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-6">
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Onboarding Progress</h3>
-            <div className="space-y-3">
-              {onboardingSteps.map((step, index) => (
-                <div key={step.id} className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                    step.completed ? 'bg-green-100' : 'bg-slate-100'
-                  }`}>
-                    {step.completed ? (
-                      <CheckCircle size={16} className="text-[#22C55E]" />
-                    ) : (
-                      <span className="text-slate-400 text-sm">{index + 1}</span>
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <div className={`font-medium ${step.completed ? 'text-slate-900' : 'text-slate-500'}`}>
-                      {step.title}
-                    </div>
-                    <div className="text-xs text-slate-500">{step.description}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Verification Status */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-6">
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Verification Status</h3>
-            <div className="space-y-3">
-              {verificationItems.map((item) => (
-                <div key={item.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <item.icon size={20} className={item.status === 'verified' ? 'text-green-600' : 'text-yellow-600'} />
-                    <span className="font-medium text-slate-900">{item.title}</span>
-                  </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                    item.status === 'verified' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                  }`}>
-                    {item.status === 'verified' ? 'Verified' : 'Pending'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Service Area & Payout */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <MapPin className="text-[#22C55E]" size={20} />
-                <h3 className="font-semibold text-slate-900">Service Area</h3>
-              </div>
-              <p className="text-slate-600 mb-2">{profile.serviceArea}</p>
-              <p className="text-sm text-slate-500">Cities: {profile.serviceCities.join(', ')}</p>
-              <button className="mt-3 text-[#22C55E] text-sm font-medium hover:underline">
-                Edit Area
-              </button>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <DollarSign className="text-[#22C55E]" size={20} />
-                <h3 className="font-semibold text-slate-900">Payout Method</h3>
-              </div>
-              <p className="text-slate-600">{profile.payoutMethod}</p>
-              <p className="text-sm text-slate-500 mt-1">{profile.payoutEmail}</p>
-              <button className="mt-3 text-[#22C55E] text-sm font-medium hover:underline">
-                Update Payout
-              </button>
-            </div>
-          </div>
-
-          {/* Contact Info */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-6">
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Contact Information</h3>
-            <div className="space-y-3">
-              <div className="flex items-center gap-3 text-slate-600">
-                <Mail size={18} className="text-slate-400" />
-                <span>{profile.email}</span>
-              </div>
-              <div className="flex items-center gap-3 text-slate-600">
-                <Phone size={18} className="text-slate-400" />
-                <span>{profile.phone}</span>
-              </div>
-              <div className="flex items-center gap-3 text-slate-600">
-                <Clock size={18} className="text-slate-400" />
-                <span>Avg. Response Time: {profile.responseTime}</span>
-              </div>
-            </div>
-            <button className="mt-4 text-[#22C55E] text-sm font-medium hover:underline">
-              Update Contact Info
-            </button>
-          </div>
-        </>
       )}
 
-      {/* Services Tab */}
-      {activeTab === 'services' && (
-        <div className="space-y-6">
-          {/* Service Radius */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Service Radius</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-600">Maximum distance from your location</span>
-                <span className="font-semibold text-[#22C55E]">{profile.serviceRadius} miles</span>
-              </div>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-slate-900">My Profile</h1>
+        <p className="text-slate-500 mt-1">
+          Customers see this when you accept their job. Make it shine.
+        </p>
+      </div>
+
+      {/* Photo & basic info */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 mb-4">
+        <div className="flex items-center gap-4 mb-5">
+          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#22C55E] to-emerald-600 flex items-center justify-center text-white text-2xl font-bold flex-shrink-0 overflow-hidden">
+            {profile.profile_image_url ? (
+              <img src={profile.profile_image_url} alt="Profile" className="w-full h-full object-cover" />
+            ) : (
+              <User size={32} />
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="font-semibold text-slate-900 truncate">{profile.display_name || 'Add your name'}</h2>
+            <p className="text-sm text-slate-500 truncate">{user?.email}</p>
+            <button
+              type="button"
+              onClick={() => {
+                const url = window.prompt('Enter photo URL (or leave blank to remove):', profile.profile_image_url)
+                if (url !== null) setProfile({ ...profile, profile_image_url: url })
+              }}
+              className="text-sm text-[#22C55E] hover:text-[#16A34A] font-medium mt-1 inline-flex items-center gap-1"
+            >
+              <Camera size={14} /> {profile.profile_image_url ? 'Change photo' : 'Add photo'}
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <Field
+            label="Display name"
+            icon={<User size={16} />}
+            value={profile.display_name}
+            onChange={(v) => setProfile({ ...profile, display_name: v })}
+            placeholder="e.g. Mike's Lawn Care"
+          />
+          <Field
+            label="Phone"
+            icon={<Phone size={16} />}
+            value={profile.phone}
+            onChange={(v) => setProfile({ ...profile, phone: v })}
+            placeholder="(555) 555-5555"
+            type="tel"
+          />
+
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1.5 flex items-center gap-1">
+              <FileText size={14} /> Bio
+            </label>
+            <textarea
+              value={profile.bio}
+              onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
+              rows={4}
+              maxLength={500}
+              placeholder="Tell customers about yourself, your experience, and what makes you great at what you do…"
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#22C55E] focus:border-transparent resize-none"
+            />
+            <p className="text-xs text-slate-400 mt-1 text-right">
+              {profile.bio.length}/500
+            </p>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1.5 flex items-center gap-1">
+              <MapPin size={14} /> Service radius (miles)
+            </label>
+            <div className="flex items-center gap-3">
               <input
                 type="range"
-                min="5"
+                min="1"
                 max="50"
-                value={profile.serviceRadius}
-                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#22C55E]"
-                readOnly
+                value={profile.service_radius_miles}
+                onChange={(e) => setProfile({ ...profile, service_radius_miles: parseInt(e.target.value) })}
+                className="flex-1 accent-[#22C55E]"
               />
-              <div className="flex justify-between text-xs text-slate-500">
-                <span>5 miles</span>
-                <span>50 miles</span>
-              </div>
+              <span className="text-sm font-semibold text-slate-900 w-12 text-right">
+                {profile.service_radius_miles} mi
+              </span>
             </div>
+            <p className="text-xs text-slate-400 mt-1">
+              How far you'll travel for jobs
+            </p>
           </div>
 
-          {/* Service Cities */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-slate-900">Service Cities</h3>
-              <button className="text-[#22C55E] text-sm font-medium flex items-center gap-1">
-                <Plus size={16} /> Add City
-              </button>
+          <label className="flex items-center justify-between p-3 bg-slate-50 rounded-lg cursor-pointer">
+            <div>
+              <p className="text-sm font-medium text-slate-900">Available for new jobs</p>
+              <p className="text-xs text-slate-500">Pause to hide jobs temporarily</p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {profile.serviceCities.map((city, idx) => (
-                <span key={idx} className="px-3 py-1.5 bg-green-50 text-green-700 rounded-full text-sm font-medium flex items-center gap-2">
-                  {city}
-                  <button className="hover:text-green-900">
-                    <X size={14} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          </div>
+            <input
+              type="checkbox"
+              checked={profile.is_available}
+              onChange={(e) => setProfile({ ...profile, is_available: e.target.checked })}
+              className="w-5 h-5 accent-[#22C55E]"
+            />
+          </label>
+        </div>
 
-          {/* Services Offered */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-slate-900">Services Offered</h3>
-              <button className="text-[#22C55E] text-sm font-medium flex items-center gap-1">
-                <Edit2 size={16} /> Edit
-              </button>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {availableServices.map((service) => {
-                const isEnabled = profile.services.includes(service)
-                return (
-                  <div
-                    key={service}
-                    className={`p-3 rounded-lg border-2 transition-colors ${
-                      isEnabled
-                        ? 'border-[#22C55E] bg-green-50'
-                        : 'border-slate-200 bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                        isEnabled ? 'border-[#22C55E] bg-[#22C55E]' : 'border-slate-300'
-                      }`}>
-                        {isEnabled && <CheckCircle size={12} className="text-white" />}
-                      </div>
-                      <span className={`font-medium ${isEnabled ? 'text-slate-900' : 'text-slate-500'}`}>
-                        {service}
-                      </span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
+        {hasChanges && (
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full mt-5 bg-[#22C55E] text-white py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+            Save profile
+          </button>
+        )}
+      </div>
 
-          {/* Equipment */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <Wrench className="text-[#22C55E]" size={20} />
-              <h3 className="text-lg font-semibold text-slate-900">Equipment Type</h3>
-            </div>
-            <div className="flex gap-3">
-              {['Residential', 'Commercial', 'Both'].map((type) => (
-                <button
-                  key={type}
-                  className={`px-4 py-2 rounded-lg border-2 font-medium transition-colors ${
-                    profile.equipmentType === type
-                      ? 'border-[#22C55E] bg-green-50 text-[#22C55E]'
-                      : 'border-slate-200 text-slate-600 hover:border-slate-300'
-                  }`}
+      {/* Skills & services */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 mb-4">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="font-semibold text-slate-900 flex items-center gap-2">
+            <Briefcase size={18} /> Services you offer
+          </h2>
+          <span className="text-xs text-slate-500">{skills.length} active</span>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          Add the services you're skilled at. Customers search by service.
+        </p>
+
+        {skills.length === 0 ? (
+          <div className="text-center py-6 border-2 border-dashed border-slate-200 rounded-lg mb-4">
+            <Award size={28} className="mx-auto mb-2 text-slate-300" />
+            <p className="text-sm text-slate-500">No services added yet</p>
+            <p className="text-xs text-slate-400 mt-1">Add your first service below</p>
+          </div>
+        ) : (
+          <div className="space-y-2 mb-4">
+            {skills.map((skill) => {
+              const catalog = SERVICE_CATALOG.find(s => s.key === skill.service_key)
+              return (
+                <div
+                  key={skill.service_key}
+                  className="flex items-center gap-3 p-3 bg-green-50 border border-green-100 rounded-lg"
                 >
-                  {type}
+                  <span className="text-2xl flex-shrink-0">{catalog?.icon || '✅'}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-slate-900">{skill.display_name}</p>
+                    {editingExperience === skill.service_key ? (
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <input
+                          type="number"
+                          min="0"
+                          max="60"
+                          value={experienceInput}
+                          onChange={(e) => setExperienceInput(e.target.value)}
+                          className="w-16 px-2 py-1 text-sm border border-slate-200 rounded"
+                          autoFocus
+                        />
+                        <span className="text-xs text-slate-500">years</span>
+                        <button
+                          onClick={() => handleSaveExperience(skill.service_key)}
+                          className="text-xs text-[#22C55E] font-semibold"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingExperience(null)
+                            setExperienceInput('')
+                          }}
+                          className="text-xs text-slate-500"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setEditingExperience(skill.service_key)
+                          setExperienceInput(String(skill.years_experience || 0))
+                        }}
+                        className="text-xs text-slate-500 hover:text-slate-700"
+                      >
+                        {skill.years_experience > 0
+                          ? `${skill.years_experience} year${skill.years_experience === 1 ? '' : 's'} experience`
+                          : 'Tap to add experience'}
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleRemoveSkill(skill.service_key)}
+                    className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded flex-shrink-0"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Add skill */}
+        {availableToAdd.length > 0 && (
+          <details className="border border-slate-200 rounded-lg">
+            <summary className="cursor-pointer p-3 text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2 list-none">
+              <Plus size={16} /> Add a service
+            </summary>
+            <div className="grid grid-cols-2 gap-2 p-3 border-t border-slate-200">
+              {availableToAdd.map((svc) => (
+                <button
+                  key={svc.key}
+                  onClick={() => handleAddSkill(svc.key)}
+                  className="flex items-center gap-2 p-2 text-left border border-slate-200 rounded-lg hover:border-[#22C55E] hover:bg-green-50 transition-colors"
+                >
+                  <span className="text-xl flex-shrink-0">{svc.icon}</span>
+                  <span className="text-sm font-medium text-slate-700 truncate">{svc.name}</span>
                 </button>
               ))}
             </div>
-          </div>
+          </details>
+        )}
+      </div>
+
+      {/* Verification status */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+        <h2 className="font-semibold text-slate-900 mb-3">Verification & Payouts</h2>
+        <p className="text-sm text-slate-500 mb-4">
+          These are managed by Stripe and won't change in this preview.
+        </p>
+        <div className="space-y-2">
+          <ChecklistRow label="Email confirmed" done />
+          <ChecklistRow label="Identity verified" done />
+          <ChecklistRow label="Background check" done />
+          <ChecklistRow label="Bank account connected" pending="Coming with Stripe Connect" />
         </div>
-      )}
+      </div>
+    </div>
+  )
+}
 
-      {/* Availability Tab */}
-      {activeTab === 'availability' && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-          <h3 className="text-lg font-semibold text-slate-900 mb-6">Weekly Availability</h3>
-          <div className="space-y-3">
-            {days.map((day) => (
-              <div key={day} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                <span className="font-medium text-slate-900 capitalize">{formatDay(day)}</span>
-                <div className="flex items-center gap-3">
-                  <span className={`text-sm ${profile.availability[day as keyof typeof profile.availability] ? 'text-green-600' : 'text-slate-400'}`}>
-                    {profile.availability[day as keyof typeof profile.availability] ? 'Available' : 'Unavailable'}
-                  </span>
-                  <button
-                    className={`w-12 h-6 rounded-full transition-colors ${
-                      profile.availability[day as keyof typeof profile.availability]
-                        ? 'bg-[#22C55E]'
-                        : 'bg-slate-300'
-                    }`}
-                  >
-                    <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                      profile.availability[day as keyof typeof profile.availability]
-                        ? 'translate-x-6'
-                        : 'translate-x-0.5'
-                    }`} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+function Field({
+  label, icon, value, onChange, placeholder, type = 'text',
+}: {
+  label: string
+  icon: React.ReactNode
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  type?: string
+}) {
+  return (
+    <div>
+      <label className="text-xs font-medium text-slate-500 mb-1.5 flex items-center gap-1">
+        {icon} {label}
+      </label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#22C55E] focus:border-transparent"
+      />
+    </div>
+  )
+}
 
-          {/* Working Hours */}
-          <div className="mt-6 pt-6 border-t border-slate-100">
-            <h4 className="font-semibold text-slate-900 mb-4">Working Hours</h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-slate-500 mb-1">Start Time</label>
-                <input type="time" value="07:00" className="w-full p-2 border border-slate-300 rounded-lg" readOnly />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-500 mb-1">End Time</label>
-                <input type="time" value="19:00" className="w-full p-2 border border-slate-300 rounded-lg" readOnly />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Settings Tab */}
-      {activeTab === 'settings' && (
-        <div className="space-y-6">
-          {/* Account Settings */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <Settings className="text-[#22C55E]" size={20} />
-              <h3 className="text-lg font-semibold text-slate-900">Account Settings</h3>
-            </div>
-            <div className="space-y-3">
-              <button className="w-full flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
-                <span className="text-slate-700 flex items-center gap-3">
-                  <Bell size={18} className="text-slate-400" />
-                  Notification Preferences
-                </span>
-                <ChevronRight size={18} className="text-slate-400" />
-              </button>
-              <button className="w-full flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
-                <span className="text-slate-700 flex items-center gap-3">
-                  <Shield size={18} className="text-slate-400" />
-                  Change Password
-                </span>
-                <ChevronRight size={18} className="text-slate-400" />
-              </button>
-              <button className="w-full flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
-                <span className="text-slate-700 flex items-center gap-3">
-                  <CreditCard size={18} className="text-slate-400" />
-                  Payment Methods
-                </span>
-                <ChevronRight size={18} className="text-slate-400" />
-              </button>
-              <button className="w-full flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
-                <span className="text-slate-700 flex items-center gap-3">
-                  <Calendar size={18} className="text-slate-400" />
-                  Schedule Settings
-                </span>
-                <ChevronRight size={18} className="text-slate-400" />
-              </button>
-            </div>
-          </div>
-
-          {/* Danger Zone */}
-          <div className="bg-white rounded-xl shadow-sm border border-red-100 p-6">
-            <h3 className="text-lg font-semibold text-red-600 mb-4">Danger Zone</h3>
-            <button className="w-full p-3 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors">
-              Deactivate Account
-            </button>
-          </div>
-        </div>
+function ChecklistRow({ label, done, pending }: { label: string; done?: boolean; pending?: string }) {
+  return (
+    <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg">
+      <span className="text-sm text-slate-700">{label}</span>
+      {done ? (
+        <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700">
+          <CheckCircle size={14} /> Verified
+        </span>
+      ) : (
+        <span className="text-xs text-slate-500">{pending || 'Pending'}</span>
       )}
     </div>
   )

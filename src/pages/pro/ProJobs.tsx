@@ -1,109 +1,44 @@
 import { useState, useEffect } from 'react'
-import { MapPin, Clock, DollarSign, Check, X, Home, Ruler, Briefcase, Calendar, TrendingUp, CheckCircle, ChevronDown, ChevronUp, Dog, Key, Camera, Timer, RefreshCw, Phone, AlertCircle, Shield } from 'lucide-react'
+import {
+  MapPin, Clock, DollarSign, Check, X, Briefcase, Calendar,
+  CheckCircle, ChevronDown, ChevronUp, RefreshCw, Phone, AlertCircle,
+  User, Mail, Loader2, ExternalLink
+} from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
-import { getAvailableJobs, getProviderAssignedJobs, acceptJob, declineJob, getProviderEarnings } from '../../lib/api'
-
-interface Job {
-  id: number
-  customer: string
-  address: string
-  city: string
-  service: string
-  price: number
-  payout: number
-  distance: string
-  time: string
-  date: string
-  lawnSize: string
-  status: 'open' | 'scheduled' | 'completed'
-  isRecurring: boolean
-  instructions: string
-  gateCode?: string
-  hasDog: boolean
-  duration: string
-  photosRequired: boolean
-  addOns: string[]
-  instructionTags?: string[]
-  instructionPhotos?: string[]
-}
+import { acceptJob, declineJob, updateProviderProfile } from '../../lib/api'
+import {
+  getAvailableJobsWithDetails,
+  getProAssignedJobsWithDetails,
+  updateBookingProgress,
+  type ProBookingWithDetails
+} from '../../lib/proDashboard'
 
 export default function ProJobs() {
   const { user } = useAuth()
-  const [expandedJob, setExpandedJob] = useState<number | null>(null)
-  const [dismissedOnboarding, setDismissedOnboarding] = useState(false)
+  const [expandedJob, setExpandedJob] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [availableJobs, setAvailableJobs] = useState<Job[]>([])
-  const [assignedJobs, setAssignedJobs] = useState<Job[]>([])
-  const [earnings, setEarnings] = useState({ total: 0, pending: 0, paid: 0 })
-  const [completedCount, setCompletedCount] = useState(0)
+  const [availableJobs, setAvailableJobs] = useState<ProBookingWithDetails[]>([])
+  const [assignedJobs, setAssignedJobs] = useState<ProBookingWithDetails[]>([])
+  const [isAvailable, setIsAvailable] = useState(true)
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   useEffect(() => {
-    if (user) {
-      fetchJobs()
-    }
+    if (user) fetchJobs()
   }, [user])
 
   const fetchJobs = async () => {
     if (!user) return
-
     setLoading(true)
     try {
-      // Fetch available jobs
-      const { data: jobs, error: jobsError } = await getAvailableJobs(user.id)
-      if (!jobsError && jobs) {
-        // Transform jobs to local format
-        setAvailableJobs(jobs.map(job => ({
-          id: parseInt(job.id.slice(0, 8), 16),
-          customer: 'Customer',
-          address: 'Address',
-          city: 'City, ST',
-          service: 'Lawn Mowing',
-          price: job.estimated_price,
-          payout: job.provider_payout_amount || job.estimated_price * 0.8,
-          distance: '0.0 mi',
-          time: job.scheduled_time_window || 'TBD',
-          date: job.scheduled_date || 'TBD',
-          lawnSize: job.yard_size_category,
-          status: 'open',
-          isRecurring: job.service_frequency !== 'one_time',
-          instructions: job.notes || '',
-          hasDog: false,
-          duration: '30-45 min',
-          photosRequired: false,
-          addOns: [],
-        })))
-      }
-
-      // Fetch assigned jobs
-      const { data: assigned, error: assignedError } = await getProviderAssignedJobs(user.id)
-      if (!assignedError && assigned) {
-        setAssignedJobs(assigned.map(job => ({
-          id: parseInt(job.id.slice(0, 8), 16),
-          customer: 'Customer',
-          address: 'Address',
-          city: 'City, ST',
-          service: 'Lawn Mowing',
-          price: job.estimated_price,
-          payout: job.provider_payout_amount || job.estimated_price * 0.8,
-          distance: '0.0 mi',
-          time: job.scheduled_time_window || 'TBD',
-          date: job.scheduled_date || 'TBD',
-          lawnSize: job.yard_size_category,
-          status: 'scheduled',
-          isRecurring: job.service_frequency !== 'one_time',
-          instructions: job.notes || '',
-          hasDog: false,
-          duration: '30-45 min',
-          photosRequired: false,
-          addOns: [],
-        })))
-      }
-
-      // Fetch earnings
-      const { data: earningsData, error: earningsError } = await getProviderEarnings(user.id)
-      if (!earningsError && earningsData) {
-        setEarnings(earningsData)
-      }
+      const [availRes, assignedRes] = await Promise.all([
+        getAvailableJobsWithDetails(),
+        getProAssignedJobsWithDetails(user.id),
+      ])
+      if (availRes.error) console.error('Error loading available jobs:', availRes.error)
+      if (assignedRes.error) console.error('Error loading assigned jobs:', assignedRes.error)
+      setAvailableJobs(availRes.data || [])
+      setAssignedJobs(assignedRes.data || [])
     } catch (error) {
       console.error('Error fetching jobs:', error)
     } finally {
@@ -111,49 +46,137 @@ export default function ProJobs() {
     }
   }
 
-  const handleAccept = async (jobId: number) => {
+  const showToast = (type: 'success' | 'error', message: string) => {
+    setToast({ type, message })
+    setTimeout(() => setToast(null), 4000)
+  }
+
+  const handleAccept = async (job: ProBookingWithDetails) => {
     if (!user) return
+    setActionInProgress(job.id)
+    const { data, error } = await acceptJob(user.id, job.id)
+    setActionInProgress(null)
+    if (error) {
+      showToast('error', `Couldn't accept job: ${error.message}`)
+      return
+    }
+    showToast('success', `Accepted ${job.customer_name || 'job'}!`)
+    setAvailableJobs(availableJobs.filter(j => j.id !== job.id))
+    setAssignedJobs([...assignedJobs, { ...job, booking_status: 'provider_assigned' }])
+  }
 
-    // Find the job in available jobs
-    const job = availableJobs.find(j => j.id === jobId)
-    if (job) {
-      // Call the API to accept the job
-      await acceptJob(user.id, jobId.toString())
+  const handleDecline = async (job: ProBookingWithDetails) => {
+    if (!user) return
+    setActionInProgress(job.id)
+    const { error } = await declineJob(user.id, job.id)
+    setActionInProgress(null)
+    if (error) {
+      showToast('error', `Couldn't decline: ${error.message}`)
+      return
+    }
+    showToast('success', 'Job declined.')
+    setAvailableJobs(availableJobs.filter(j => j.id !== job.id))
+  }
 
-      // Move from available to assigned
-      setAvailableJobs(availableJobs.filter(j => j.id !== jobId))
-      setAssignedJobs([...assignedJobs, { ...job, status: 'scheduled' }])
+  const handleProgressUpdate = async (job: ProBookingWithDetails, newStatus: 'on_the_way' | 'arrived' | 'in_progress' | 'completed') => {
+    setActionInProgress(job.id)
+    const { error } = await updateBookingProgress(job.id, newStatus)
+    setActionInProgress(null)
+    if (error) {
+      showToast('error', `Couldn't update: ${error.message}`)
+      return
+    }
+    const label = {
+      on_the_way: "You're on the way!",
+      arrived: 'Marked as arrived.',
+      in_progress: 'Job in progress.',
+      completed: 'Marked complete! Great work.',
+    }[newStatus]
+    showToast('success', label)
+    setAssignedJobs(
+      assignedJobs.map(j => (j.id === job.id ? { ...j, booking_status: newStatus, completed_at: newStatus === 'completed' ? new Date().toISOString() : j.completed_at } : j))
+    )
+  }
+
+  const toggleAvailability = async () => {
+    const next = !isAvailable
+    setIsAvailable(next)
+    if (user) {
+      await updateProviderProfile(user.id, { is_available: next } as any)
+      showToast('success', next ? 'You are now accepting jobs' : 'You are paused — no new jobs will be assigned')
     }
   }
 
-  const handleDecline = async (jobId: number) => {
-    if (!user) return
-
-    // Call the API to decline the job
-    await declineJob(user.id, jobId.toString())
-
-    // Remove from available jobs
-    setAvailableJobs(availableJobs.filter(j => j.id !== jobId))
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return 'TBD'
+    try {
+      const d = new Date(dateStr)
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+    } catch {
+      return dateStr
+    }
   }
 
-  const onboardingItems = [
-    { id: 1, title: 'Complete your profile', description: 'Add a photo and bio', completed: true, link: '/pro/profile' },
-    { id: 2, title: 'Set your service area', description: 'Choose cities and radius', completed: true, link: '/pro/area' },
-    { id: 3, title: 'Verify your identity', description: 'Upload ID and pass background check', completed: false, link: '/pro/profile' },
-    { id: 4, title: 'Connect payout method', description: 'Add bank account or PayPal', completed: true, link: '/pro/profile' },
-  ]
-
-  const completedItemsCount = onboardingItems.filter(item => item.completed).length
-  const allCompleted = completedItemsCount === onboardingItems.length
-
-  const toggleExpand = (jobId: number) => {
-    setExpandedJob(expandedJob === jobId ? null : jobId)
+  const formatAddress = (job: ProBookingWithDetails) => {
+    const parts = [job.address_line, job.address_city, job.address_state].filter(Boolean)
+    return parts.join(', ') || 'Address unavailable'
   }
 
-  const openJobs = availableJobs.filter(j => j.status === 'open')
+  // Filter assigned jobs into active vs done
+  const activeAssigned = assignedJobs.filter(j => j.booking_status !== 'completed')
+  const completedAssigned = assignedJobs.filter(j => j.booking_status === 'completed')
+
+  // Stats
+  const openJobs = availableJobs.filter(j => isAvailable)
+
+  if (loading) {
+    return (
+      <div className="p-4 md:p-6 flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <Loader2 size={32} className="animate-spin text-[#22C55E] mx-auto mb-3" />
+          <p className="text-slate-500">Loading jobs…</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-4 md:p-6">
+      {/* Toast */}
+      {toast && (
+        <div
+          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-white font-medium animate-pulse ${
+            toast.type === 'success' ? 'bg-[#22C55E]' : 'bg-red-500'
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
+
+      {/* Availability toggle */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-6 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-slate-900">
+            {isAvailable ? '🟢 You are accepting jobs' : '⏸️ You are paused'}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            {isAvailable
+              ? 'New jobs in your service area will appear below.'
+              : 'Toggle on to start seeing and accepting jobs again.'}
+          </p>
+        </div>
+        <button
+          onClick={toggleAvailability}
+          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+            isAvailable
+              ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              : 'bg-[#22C55E] text-white hover:bg-[#16A34A]'
+          }`}
+        >
+          {isAvailable ? 'Pause' : 'Go online'}
+        </button>
+      </div>
+
       {/* Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
@@ -164,7 +187,7 @@ export default function ProJobs() {
             <span className="text-xs text-slate-500">Available</span>
           </div>
           <div className="text-2xl font-bold text-slate-900">{openJobs.length}</div>
-          <div className="text-xs text-slate-400">Jobs near you</div>
+          <div className="text-xs text-slate-400">Jobs in your area</div>
         </div>
 
         <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
@@ -174,7 +197,7 @@ export default function ProJobs() {
             </div>
             <span className="text-xs text-slate-500">Upcoming</span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">{assignedJobs.length}</div>
+          <div className="text-2xl font-bold text-slate-900">{activeAssigned.length}</div>
           <div className="text-xs text-slate-400">Scheduled jobs</div>
         </div>
 
@@ -185,105 +208,70 @@ export default function ProJobs() {
             </div>
             <span className="text-xs text-slate-500">Completed</span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">{completedCount}</div>
-          <div className="text-xs text-slate-400">This month</div>
+          <div className="text-2xl font-bold text-slate-900">{completedAssigned.length}</div>
+          <div className="text-xs text-slate-400">All time</div>
         </div>
 
         <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100">
           <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-green-50 rounded-lg">
-              <DollarSign size={18} className="text-green-600" />
+            <div className="p-2 bg-amber-50 rounded-lg">
+              <DollarSign size={18} className="text-amber-600" />
             </div>
-            <span className="text-xs text-slate-500">Earnings</span>
+            <span className="text-xs text-slate-500">All-time Earned</span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">${earnings.total}</div>
-          <div className="text-xs text-slate-400">This month</div>
+          <div className="text-2xl font-bold text-slate-900">
+            ${assignedJobs
+              .filter(j => j.booking_status === 'completed')
+              .reduce((sum, j) => sum + (j.provider_payout_amount || 0), 0)
+              .toFixed(2)}
+          </div>
+          <div className="text-xs text-slate-400">From completed jobs</div>
         </div>
       </div>
 
-      {/* Onboarding Checklist */}
-      {!dismissedOnboarding && !allCompleted && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <AlertCircle size={18} className="text-blue-600" />
-              <h3 className="font-semibold text-slate-900">Complete your profile to get more jobs</h3>
-            </div>
-            <button
-              onClick={() => setDismissedOnboarding(true)}
-              className="text-slate-400 hover:text-slate-600"
-            >
-              <X size={18} />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {onboardingItems.map((item) => (
-              <a
-                key={item.id}
-                href={item.link}
-                className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-colors ${
-                  item.completed
-                    ? 'border-green-200 bg-green-50'
-                    : 'border-blue-200 bg-blue-50 hover:border-blue-300'
-                }`}
-              >
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                  item.completed
-                    ? 'bg-green-500'
-                    : 'bg-blue-500'
-                }`}>
-                  {item.completed ? (
-                    <Check size={16} className="text-white" />
-                  ) : (
-                    <AlertCircle size={16} className="text-white" />
-                  )}
-                </div>
-                <div className="flex-1">
-                  <div className={`font-medium ${item.completed ? 'text-green-900' : 'text-blue-900'}`}>
-                    {item.title}
-                  </div>
-                  <div className="text-xs text-slate-500">{item.description}</div>
-                </div>
-              </a>
+      {/* Upcoming Scheduled Jobs */}
+      {activeAssigned.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">My Upcoming Jobs</h2>
+          <div className="space-y-3">
+            {activeAssigned.map((job) => (
+              <AssignedJobCard
+                key={job.id}
+                job={job}
+                expanded={expandedJob === job.id}
+                onToggle={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
+                onUpdate={handleProgressUpdate}
+                actionInProgress={actionInProgress === job.id}
+                formatDate={formatDate}
+                formatAddress={formatAddress}
+              />
             ))}
-          </div>
-
-          <div className="mt-3 text-center">
-            <span className="text-sm text-slate-500">
-              {completedItemsCount} of {onboardingItems.length} completed
-            </span>
           </div>
         </div>
       )}
 
-      {/* Upcoming Scheduled Jobs */}
-      {assignedJobs.length > 0 && (
+      {/* Recently Completed */}
+      {completedAssigned.length > 0 && (
         <div className="mb-8">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">Upcoming Scheduled Jobs</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {assignedJobs.map((job) => (
-              <div key={job.id} className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl p-4">
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <h3 className="font-semibold text-slate-900">{job.customer}</h3>
-                    <p className="text-sm text-slate-600">{job.address}, {job.city}</p>
-                  </div>
-                  <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-medium">
-                    Confirmed
-                  </span>
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">Recently Completed</h2>
+          <div className="space-y-2">
+            {completedAssigned.slice(0, 5).map((job) => (
+              <div
+                key={job.id}
+                className="bg-white rounded-xl p-3 border border-slate-100 flex items-center justify-between"
+              >
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-slate-900">{job.customer_name || 'Customer'}</p>
+                  <p className="text-xs text-slate-500">{formatAddress(job)}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {formatDate(job.scheduled_date)} {job.scheduled_time_window || ''}
+                  </p>
                 </div>
-                <div className="flex items-center gap-4 text-sm text-slate-500 mt-2">
-                  <span className="flex items-center gap-1">
-                    <Clock size={14} /> {job.date}, {job.time}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Timer size={14} /> {job.duration}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between mt-3 pt-3 border-t border-green-200">
-                  <span className="text-sm text-slate-600">{job.service}</span>
-                  <span className="font-bold text-green-700">${job.payout}</span>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-[#22C55E]">
+                    +${(job.provider_payout_amount || 0).toFixed(2)}
+                  </p>
+                  <p className="text-xs text-slate-400">earned</p>
                 </div>
               </div>
             ))}
@@ -293,185 +281,326 @@ export default function ProJobs() {
 
       {/* Available Jobs */}
       <div>
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">Available Jobs Near You</h2>
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">
+          Available Jobs {!isAvailable && <span className="text-sm font-normal text-slate-500">(paused)</span>}
+        </h2>
         {openJobs.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-xl border border-slate-100">
             <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <Briefcase size={32} className="text-slate-400" />
             </div>
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">No jobs available</h3>
-            <p className="text-slate-500">Check back soon for new opportunities in your area.</p>
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">
+              {isAvailable ? 'No jobs available right now' : 'You are paused'}
+            </h3>
+            <p className="text-slate-500 max-w-sm mx-auto">
+              {isAvailable
+                ? "We'll show new jobs here as they come in. Check back soon!"
+                : 'Toggle "Go online" above to start seeing and accepting jobs again.'}
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
             {openJobs.map((job) => (
-              <div key={job.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                {/* Card Header - Payout Emphasized */}
-                <div className="bg-gradient-to-r from-green-500 to-emerald-600 p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-green-100 text-xs font-medium">Your Payout</p>
-                      <p className="text-white text-3xl font-bold">${job.payout}</p>
-                    </div>
-                    <div className="text-right">
-                      {job.isRecurring && (
-                        <div className="flex items-center gap-1 text-green-100 text-xs mb-1">
-                          <RefreshCw size={12} /> Recurring
-                        </div>
-                      )}
-                      <p className="text-white/80 text-sm">Customer pays ${job.price}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Card Body */}
-                <div className="p-4">
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <h3 className="text-lg font-semibold text-slate-900">{job.customer}</h3>
-                      <div className="flex items-center gap-1 text-slate-500 text-sm mt-1">
-                        <MapPin size={14} />
-                        {job.address}, {job.city}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => toggleExpand(job.id)}
-                      className="text-[#22C55E] text-sm font-medium flex items-center gap-1"
-                    >
-                      {expandedJob === job.id ? 'Hide details' : 'View details'}
-                      {expandedJob === job.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                    </button>
-                  </div>
-
-                  {/* Job Details */}
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    <span className="bg-slate-100 text-slate-700 px-3 py-1 rounded-full text-xs font-medium">
-                      {job.service}
-                    </span>
-                    <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1">
-                      <Ruler size={12} /> {job.lawnSize}
-                    </span>
-                    <span className="bg-purple-50 text-purple-700 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1">
-                      <Clock size={12} /> {job.date}, {job.time}
-                    </span>
-                    <span className="bg-orange-50 text-orange-700 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1">
-                      <Timer size={12} /> {job.duration}
-                    </span>
-                  </div>
-
-                  {/* Distance */}
-                  <div className="flex items-center gap-1 text-slate-500 text-sm mb-4">
-                    <MapPin size={14} />
-                    {job.distance} away
-                  </div>
-
-                  {/* Add-ons */}
-                  {job.addOns.length > 0 && (
-                    <div className="mb-4">
-                      <p className="text-xs text-slate-500 mb-1">Add-ons included:</p>
-                      <div className="flex flex-wrap gap-1">
-                        {job.addOns.map((addon, idx) => (
-                          <span key={idx} className="bg-amber-50 text-amber-700 px-2 py-1 rounded text-xs font-medium">
-                            + {addon}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Expanded Details */}
-                  {expandedJob === job.id && (
-                    <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
-                      {/* Instruction Tags */}
-                      {job.instructionTags && job.instructionTags.length > 0 && (
-                        <div className="flex items-start gap-2">
-                          <AlertCircle size={16} className="text-amber-500 mt-0.5" />
-                          <div>
-                            <p className="text-xs text-slate-500">Important Notes</p>
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {job.instructionTags.map((tag, idx) => (
-                                <span key={idx} className="inline-flex items-center gap-1 bg-amber-100 text-amber-700 px-2 py-1 rounded-full text-xs font-medium">
-                                  {tag === 'pets' && '🐶 Pets'}
-                                  {tag === 'locked_gate' && '🔒 Locked Gate'}
-                                  {tag === 'obstacles' && '⚠️ Obstacles'}
-                                  {tag === 'fragile' && '🌷 Fragile Landscaping'}
-                                  {tag === 'call_first' && '📞 Call Before Arrival'}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Instruction Photos */}
-                      {job.instructionPhotos && job.instructionPhotos.length > 0 && (
-                        <div className="flex items-start gap-2">
-                          <Camera size={16} className="text-blue-500 mt-0.5" />
-                          <div>
-                            <p className="text-xs text-slate-500">Customer Photos</p>
-                            <div className="flex gap-2 mt-1">
-                              {job.instructionPhotos.map((photo, idx) => (
-                                <img key={idx} src={photo} alt={`Instruction ${idx + 1}`} className="w-16 h-16 object-cover rounded-lg" />
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {job.instructions && (
-                        <div className="flex items-start gap-2">
-                          <Key size={16} className="text-slate-400 mt-0.5" />
-                          <div>
-                            <p className="text-xs text-slate-500">Special Instructions</p>
-                            <p className="text-sm text-slate-700">{job.instructions}</p>
-                          </div>
-                        </div>
-                      )}
-                      {job.gateCode && (
-                        <div className="flex items-center gap-2">
-                          <Key size={16} className="text-slate-400" />
-                          <div>
-                            <p className="text-xs text-slate-500">Gate Code</p>
-                            <p className="text-sm font-medium text-slate-900">{job.gateCode}</p>
-                          </div>
-                        </div>
-                      )}
-                      {job.hasDog && (
-                        <div className="flex items-center gap-2">
-                          <Dog size={16} className="text-amber-500" />
-                          <span className="text-sm text-amber-700 font-medium">Dog on property - proceed with caution</span>
-                        </div>
-                      )}
-                      {job.photosRequired && (
-                        <div className="flex items-center gap-2">
-                          <Camera size={16} className="text-blue-500" />
-                          <span className="text-sm text-blue-700 font-medium">Completion photos required</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Action Buttons */}
-                  <div className="flex gap-3 mt-4">
-                    <button
-                      onClick={() => handleAccept(job.id)}
-                      className="flex-1 bg-[#22C55E] text-white py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors flex items-center justify-center gap-2 active:scale-[0.98]"
-                    >
-                      <Check size={18} /> Accept
-                    </button>
-                    <button
-                      onClick={() => handleDecline(job.id)}
-                      className="flex-1 border border-slate-300 text-slate-600 py-3 rounded-xl font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 active:scale-[0.98]"
-                    >
-                      <X size={18} /> Decline
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <AvailableJobCard
+                key={job.id}
+                job={job}
+                expanded={expandedJob === job.id}
+                onToggle={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
+                onAccept={() => handleAccept(job)}
+                onDecline={() => handleDecline(job)}
+                actionInProgress={actionInProgress === job.id}
+                formatDate={formatDate}
+                formatAddress={formatAddress}
+              />
             ))}
           </div>
         )}
       </div>
     </div>
   )
+}
+
+function AvailableJobCard({
+  job, expanded, onToggle, onAccept, onDecline, actionInProgress, formatDate, formatAddress,
+}: {
+  job: ProBookingWithDetails
+  expanded: boolean
+  onToggle: () => void
+  onAccept: () => void
+  onDecline: () => void
+  actionInProgress: boolean
+  formatDate: (d: string | null) => string
+  formatAddress: (j: ProBookingWithDetails) => string
+}) {
+  const payout = job.provider_payout_amount ?? (job.estimated_price * 0.8)
+  const isRecurring = job.service_frequency && job.service_frequency !== 'one_time'
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+      {/* Card Header - Payout Emphasized */}
+      <div className="bg-gradient-to-r from-green-500 to-emerald-600 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-green-100 text-xs font-medium">Your Payout</p>
+            <p className="text-white text-3xl font-bold">${payout.toFixed(2)}</p>
+          </div>
+          <div className="text-right">
+            {isRecurring && (
+              <div className="flex items-center gap-1 text-green-100 text-xs mb-1 justify-end">
+                <RefreshCw size={12} /> Recurring ({job.service_frequency})
+              </div>
+            )}
+            <p className="text-white/80 text-sm">Customer pays ${job.estimated_price.toFixed(2)}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-4">
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">{job.customer_name || 'Customer'}</h3>
+            <div className="flex items-center gap-1 text-slate-500 text-sm mt-1">
+              <MapPin size={14} />
+              {formatAddress(job)}
+            </div>
+          </div>
+          <button
+            onClick={onToggle}
+            className="text-[#22C55E] text-sm font-medium flex items-center gap-1"
+          >
+            {expanded ? 'Hide details' : 'View details'}
+            {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-4">
+          <span className="bg-slate-100 text-slate-700 px-3 py-1 rounded-full text-xs font-medium capitalize">
+            {job.service_type}
+          </span>
+          <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium capitalize">
+            {job.yard_size_category} yard
+          </span>
+          <span className="bg-purple-50 text-purple-700 px-3 py-1 rounded-full text-xs font-medium">
+            {formatDate(job.scheduled_date)} · {job.scheduled_time_window || 'Time TBD'}
+          </span>
+        </div>
+
+        {expanded && (
+          <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
+            {job.notes && (
+              <div className="flex items-start gap-2">
+                <AlertCircle size={16} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-500">Special Instructions</p>
+                  <p className="text-sm text-slate-700 whitespace-pre-line">{job.notes}</p>
+                </div>
+              </div>
+            )}
+            {job.customer_phone && (
+              <div className="flex items-center gap-2">
+                <Phone size={16} className="text-slate-400" />
+                <a href={`tel:${job.customer_phone}`} className="text-sm text-blue-600 hover:underline">
+                  {job.customer_phone}
+                </a>
+              </div>
+            )}
+            {job.customer_email && (
+              <div className="flex items-center gap-2">
+                <Mail size={16} className="text-slate-400" />
+                <a href={`mailto:${job.customer_email}`} className="text-sm text-blue-600 hover:underline">
+                  {job.customer_email}
+                </a>
+              </div>
+            )}
+            <div className="flex items-start gap-2 pt-2">
+              <ExternalLink size={14} className="text-slate-400 mt-0.5" />
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(job))}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-600 hover:underline"
+              >
+                Open in Google Maps
+              </a>
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-3 mt-4">
+          <button
+            onClick={onAccept}
+            disabled={actionInProgress}
+            className="flex-1 bg-[#22C55E] text-white py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50"
+          >
+            {actionInProgress ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}
+            Accept
+          </button>
+          <button
+            onClick={onDecline}
+            disabled={actionInProgress}
+            className="flex-1 border border-slate-300 text-slate-600 py-3 rounded-xl font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50"
+          >
+            <X size={18} /> Decline
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AssignedJobCard({
+  job, expanded, onToggle, onUpdate, actionInProgress, formatDate, formatAddress,
+}: {
+  job: ProBookingWithDetails
+  expanded: boolean
+  onToggle: () => void
+  onUpdate: (job: ProBookingWithDetails, status: 'on_the_way' | 'arrived' | 'in_progress' | 'completed') => void
+  actionInProgress: boolean
+  formatDate: (d: string | null) => string
+  formatAddress: (j: ProBookingWithDetails) => string
+}) {
+  const statusInfo = getStatusInfo(job.booking_status)
+  const nextStep = getNextStep(job.booking_status)
+  const payout = job.provider_payout_amount ?? job.estimated_price
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className={`p-4 ${statusInfo.bgClass}`}>
+        <div className="flex items-start justify-between mb-2">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="font-semibold text-slate-900">{job.customer_name || 'Customer'}</h3>
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusInfo.badgeClass}`}>
+                {statusInfo.label}
+              </span>
+            </div>
+            <p className="text-sm text-slate-600">{formatAddress(job)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-slate-500">You'll earn</p>
+            <p className="text-xl font-bold text-[#22C55E]">${payout.toFixed(2)}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-4 text-sm text-slate-600 mt-2">
+          <span className="flex items-center gap-1">
+            <Clock size={14} /> {formatDate(job.scheduled_date)} · {job.scheduled_time_window || 'Time TBD'}
+          </span>
+          <span className="capitalize flex items-center gap-1">
+            <User size={14} /> {job.service_type}
+          </span>
+        </div>
+      </div>
+
+      <div className="p-4">
+        <button
+          onClick={onToggle}
+          className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1 mb-3"
+        >
+          {expanded ? 'Hide' : 'Show'} job details
+          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
+
+        {expanded && (
+          <div className="space-y-3 mb-4 pb-4 border-b border-slate-100">
+            {job.notes && (
+              <div className="flex items-start gap-2">
+                <AlertCircle size={16} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-500">Special Instructions</p>
+                  <p className="text-sm text-slate-700 whitespace-pre-line">{job.notes}</p>
+                </div>
+              </div>
+            )}
+            {job.customer_phone && (
+              <div className="flex items-center gap-2">
+                <Phone size={16} className="text-slate-400" />
+                <a href={`tel:${job.customer_phone}`} className="text-sm text-blue-600 hover:underline">
+                  {job.customer_phone}
+                </a>
+              </div>
+            )}
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(job))}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1"
+            >
+              <ExternalLink size={14} /> Open in Google Maps
+            </a>
+          </div>
+        )}
+
+        {nextStep && (
+          <button
+            onClick={() => onUpdate(job, nextStep.action)}
+            disabled={actionInProgress}
+            className="w-full bg-[#22C55E] text-white py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {actionInProgress ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : (
+              <CheckCircle size={18} />
+            )}
+            {nextStep.label}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function getStatusInfo(status: string): { label: string; bgClass: string; badgeClass: string } {
+  switch (status) {
+    case 'provider_assigned':
+      return {
+        label: 'Confirmed',
+        bgClass: 'bg-gradient-to-r from-green-50 to-emerald-50 border-b border-green-100',
+        badgeClass: 'bg-green-100 text-green-700',
+      }
+    case 'on_the_way':
+      return {
+        label: 'On the way',
+        bgClass: 'bg-gradient-to-r from-blue-50 to-sky-50 border-b border-blue-100',
+        badgeClass: 'bg-blue-100 text-blue-700',
+      }
+    case 'arrived':
+      return {
+        label: 'Arrived',
+        bgClass: 'bg-gradient-to-r from-amber-50 to-yellow-50 border-b border-amber-100',
+        badgeClass: 'bg-amber-100 text-amber-700',
+      }
+    case 'in_progress':
+      return {
+        label: 'In progress',
+        bgClass: 'bg-gradient-to-r from-purple-50 to-fuchsia-50 border-b border-purple-100',
+        badgeClass: 'bg-purple-100 text-purple-700',
+      }
+    case 'completed':
+      return {
+        label: 'Completed',
+        bgClass: 'bg-gradient-to-r from-slate-50 to-gray-50 border-b border-slate-100',
+        badgeClass: 'bg-slate-200 text-slate-700',
+      }
+    default:
+      return {
+        label: status,
+        bgClass: 'bg-slate-50',
+        badgeClass: 'bg-slate-100 text-slate-600',
+      }
+  }
+}
+
+function getNextStep(currentStatus: string): { action: 'on_the_way' | 'arrived' | 'in_progress' | 'completed'; label: string } | null {
+  switch (currentStatus) {
+    case 'provider_assigned':
+      return { action: 'on_the_way', label: "I'm on the way" }
+    case 'on_the_way':
+      return { action: 'arrived', label: "I've arrived" }
+    case 'arrived':
+      return { action: 'in_progress', label: 'Start work' }
+    case 'in_progress':
+      return { action: 'completed', label: 'Mark complete' }
+    default:
+      return null
+  }
 }

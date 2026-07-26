@@ -1,323 +1,365 @@
-import { useState } from 'react'
-import { Calendar, Clock, MapPin, Phone, Home, Play, CheckCircle, Navigation, Check, Flag, Timer } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import {
+  Calendar, Clock, MapPin, Phone, Loader2, CheckCircle,
+  ChevronRight, ExternalLink, Filter, User
+} from 'lucide-react'
+import { useAuth } from '../../lib/auth-context'
+import { getProAssignedJobsWithDetails, type ProBookingWithDetails } from '../../lib/proDashboard'
 
-interface ScheduledJob {
-  id: number
-  customer: string
-  address: string
-  city: string
-  service: string
-  payout: number
-  time: string
-  date: string
-  day: string
-  phone?: string
-  status: 'scheduled' | 'en_route' | 'arrived' | 'in_progress' | 'completed'
-  instructions?: string
-}
-
-type JobStatus = 'scheduled' | 'en_route' | 'arrived' | 'in_progress' | 'completed'
-
-const statusSteps: { key: JobStatus; label: string; icon: any }[] = [
-  { key: 'scheduled', label: 'Scheduled', icon: Calendar },
-  { key: 'en_route', label: 'On the way', icon: Navigation },
-  { key: 'arrived', label: 'Arrived', icon: Flag },
-  { key: 'in_progress', label: 'Mowing', icon: Timer },
-  { key: 'completed', label: 'Completed', icon: CheckCircle },
-]
+type StatusFilter = 'all' | 'active' | 'completed'
 
 export default function ProSchedule() {
-  const [activeJob, setActiveJob] = useState<number | null>(null)
-  const [upcomingJobs, setUpcomingJobs] = useState<ScheduledJob[]>([
-    {
-      id: 1,
-      customer: 'Sarah Johnson',
-      address: '123 Main St',
-      city: 'Austin, TX',
-      service: 'Lawn Mowing',
-      payout: 35,
-      time: '10:00 AM',
-      date: 'March 10',
-      day: 'Today',
-      phone: '(512) 555-0101',
-      status: 'scheduled',
-      instructions: 'Front yard only. Park on street.',
-    },
-    {
-      id: 2,
-      customer: 'Michael Chen',
-      address: '456 Oak Ave',
-      city: 'Austin, TX',
-      service: 'Lawn Mowing + Edging',
-      payout: 45,
-      time: '2:00 PM',
-      date: 'March 10',
-      day: 'Today',
-      phone: '(512) 555-0102',
-      status: 'scheduled',
-      instructions: 'Gate code in door. Backyard accessible.',
-    },
-    {
-      id: 3,
-      customer: 'Emily Rodriguez',
-      address: '789 Pine Rd',
-      city: 'Austin, TX',
-      service: 'Lawn Mowing',
-      payout: 30,
-      time: '9:00 AM',
-      date: 'March 11',
-      day: 'Tomorrow',
-      phone: '(512) 555-0103',
-      status: 'scheduled',
-    },
-    {
-      id: 4,
-      customer: 'David Kim',
-      address: '321 Maple Dr',
-      city: 'Austin, TX',
-      service: 'Lawn Mowing + Leaf Removal',
-      payout: 55,
-      time: '11:00 AM',
-      date: 'March 11',
-      day: 'Tomorrow',
-      phone: '(512) 555-0104',
-      status: 'scheduled',
-    },
-  ])
+  const { user } = useAuth()
+  const [loading, setLoading] = useState(true)
+  const [jobs, setJobs] = useState<ProBookingWithDetails[]>([])
+  const [filter, setFilter] = useState<StatusFilter>('all')
+  const [selectedJob, setSelectedJob] = useState<ProBookingWithDetails | null>(null)
 
-  const updateJobStatus = (jobId: number, newStatus: JobStatus) => {
-    setUpcomingJobs(jobs =>
-      jobs.map(job =>
-        job.id === jobId ? { ...job, status: newStatus } : job
-      )
+  useEffect(() => {
+    if (user) fetchJobs()
+  }, [user])
+
+  const fetchJobs = async () => {
+    if (!user) return
+    setLoading(true)
+    try {
+      const { data, error } = await getProAssignedJobsWithDetails(user.id)
+      if (error) console.error('Schedule fetch error:', error)
+      setJobs(data || [])
+    } catch (error) {
+      console.error('Error fetching schedule:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Group jobs by date
+  const jobsByDate = useMemo(() => {
+    const filtered = jobs.filter(j => {
+      if (filter === 'all') return true
+      if (filter === 'active') return j.booking_status !== 'completed'
+      if (filter === 'completed') return j.booking_status === 'completed'
+      return true
+    })
+    const groups = new Map<string, ProBookingWithDetails[]>()
+    for (const job of filtered) {
+      const dateKey = job.scheduled_date || 'Unscheduled'
+      if (!groups.has(dateKey)) groups.set(dateKey, [])
+      groups.get(dateKey)!.push(job)
+    }
+    // Sort each group by time
+    for (const list of groups.values()) {
+      list.sort((a, b) => (a.scheduled_time_window || '').localeCompare(b.scheduled_time_window || ''))
+    }
+    // Sort dates
+    return new Map([...groups.entries()].sort(([a], [b]) => a.localeCompare(b)))
+  }, [jobs, filter])
+
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr || dateStr === 'Unscheduled') return dateStr || 'Unscheduled'
+    try {
+      const d = new Date(dateStr)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const tomorrow = new Date(today)
+      tomorrow.setDate(today.getDate() + 1)
+      const jobDay = new Date(d)
+      jobDay.setHours(0, 0, 0, 0)
+
+      if (jobDay.getTime() === today.getTime()) return 'Today'
+      if (jobDay.getTime() === tomorrow.getTime()) return 'Tomorrow'
+
+      return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+    } catch {
+      return dateStr
+    }
+  }
+
+  const isToday = (dateStr: string | null) => {
+    if (!dateStr) return false
+    try {
+      const d = new Date(dateStr)
+      const today = new Date()
+      return d.getFullYear() === today.getFullYear() &&
+             d.getMonth() === today.getMonth() &&
+             d.getDate() === today.getDate()
+    } catch {
+      return false
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="p-4 md:p-6 flex items-center justify-center min-h-[400px]">
+        <Loader2 size={32} className="animate-spin text-[#22C55E]" />
+      </div>
     )
   }
 
-  const getNextStatus = (currentStatus: JobStatus): JobStatus | null => {
-    const currentIndex = statusSteps.findIndex(s => s.key === currentStatus)
-    if (currentIndex < statusSteps.length - 1) {
-      return statusSteps[currentIndex + 1].key
-    }
-    return null
-  }
-
-  const getActionLabel = (status: JobStatus): string => {
-    switch (status) {
-      case 'scheduled': return 'Start Job'
-      case 'en_route': return 'Mark Arrived'
-      case 'arrived': return 'Start Mowing'
-      case 'in_progress': return 'Complete Job'
-      case 'completed': return 'Completed'
-      default: return 'Start'
-    }
-  }
-
-  const getActionIcon = (status: JobStatus) => {
-    switch (status) {
-      case 'scheduled': return Play
-      case 'en_route': return Flag
-      case 'arrived': return Timer
-      case 'in_progress': return CheckCircle
-      case 'completed': return Check
-      default: return Play
-    }
-  }
-
-  const todayJobs = upcomingJobs.filter(j => j.day === 'Today')
-  const tomorrowJobs = upcomingJobs.filter(j => j.day === 'Tomorrow')
+  const totalActive = jobs.filter(j => j.booking_status !== 'completed').length
+  const totalCompleted = jobs.filter(j => j.booking_status === 'completed').length
 
   return (
-    <div className="p-4 md:p-6">
-      {/* Header */}
+    <div className="p-4 md:p-6 max-w-3xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">My Schedule</h1>
-        <p className="text-slate-500 text-sm">{upcomingJobs.length} jobs scheduled</p>
+        <p className="text-slate-500 mt-1">All your upcoming and recent jobs</p>
       </div>
 
-      {/* Today's Jobs */}
-      {todayJobs.length > 0 && (
-        <div className="mb-8">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <h2 className="text-lg font-semibold text-slate-900">Today</h2>
-            <span className="text-sm text-slate-500">({todayJobs.length} jobs)</span>
-          </div>
-          <div className="space-y-4">
-            {todayJobs.map((job) => {
-              const currentStepIndex = statusSteps.findIndex(s => s.key === job.status)
-              const ActionIcon = getActionIcon(job.status)
-              const nextStatus = getNextStatus(job.status)
+      {/* Filter chips */}
+      <div className="flex items-center gap-2 mb-5 overflow-x-auto">
+        <Filter size={16} className="text-slate-400 flex-shrink-0" />
+        <FilterChip
+          label={`All (${jobs.length})`}
+          active={filter === 'all'}
+          onClick={() => setFilter('all')}
+        />
+        <FilterChip
+          label={`Active (${totalActive})`}
+          active={filter === 'active'}
+          onClick={() => setFilter('active')}
+        />
+        <FilterChip
+          label={`Completed (${totalCompleted})`}
+          active={filter === 'completed'}
+          onClick={() => setFilter('completed')}
+        />
+      </div>
 
-              return (
-                <div key={job.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                  {/* Status Progress Bar */}
-                  <div className="bg-slate-50 px-4 py-3 border-b border-slate-100">
-                    <div className="flex items-center justify-between">
-                      {statusSteps.map((step, index) => {
-                        const isCompleted = index <= currentStepIndex
-                        const isCurrent = index === currentStepIndex
-                        const StepIcon = step.icon
-
-                        return (
-                          <div key={step.key} className="flex items-center">
-                            <div className={`flex flex-col items-center ${index > 0 ? 'ml-2 md:ml-4' : ''}`}>
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                                isCompleted
-                                  ? job.status === 'completed'
-                                    ? 'bg-green-500 text-white'
-                                    : 'bg-[#22C55E] text-white'
-                                  : 'bg-slate-200 text-slate-400'
-                              }`}>
-                                <StepIcon size={14} />
-                              </div>
-                              <span className={`text-[10px] mt-1 hidden md:block ${isCompleted ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
-                                {step.label}
-                              </span>
-                            </div>
-                            {index < statusSteps.length - 1 && (
-                              <div className={`w-4 md:w-8 h-0.5 mx-1 ${index < currentStepIndex ? 'bg-[#22C55E]' : 'bg-slate-200'}`} />
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Job Header */}
-                  <div className="bg-gradient-to-r from-[#22C55E] to-emerald-600 p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="text-white">
-                        <p className="text-sm font-medium opacity-90">Scheduled for</p>
-                        <p className="text-2xl font-bold">{job.time}</p>
-                      </div>
-                      <div className="text-right text-white">
-                        <p className="text-sm font-medium opacity-90">Your Payout</p>
-                        <p className="text-2xl font-bold">${job.payout}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Job Details */}
-                  <div className="p-4">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h3 className="font-semibold text-slate-900">{job.customer}</h3>
-                        <div className="flex items-center gap-1 text-slate-500 text-sm mt-1">
-                          <MapPin size={14} />
-                          {job.address}, {job.city}
-                        </div>
-                        {job.instructions && (
-                          <div className="mt-2 text-xs text-slate-500 bg-slate-50 p-2 rounded">
-                            {job.instructions}
-                          </div>
-                        )}
-                      </div>
-                      <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-medium">
-                        {job.service}
-                      </span>
-                    </div>
-
-                    {/* Action Buttons */}
-                    {job.status !== 'completed' ? (
-                      <div className="flex gap-3">
-                        <button
-                          onClick={() => nextStatus && updateJobStatus(job.id, nextStatus)}
-                          className="flex-1 bg-[#22C55E] text-white py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors flex items-center justify-center gap-2 active:scale-[0.98]"
-                        >
-                          <ActionIcon size={16} />
-                          {getActionLabel(job.status)}
-                        </button>
-                        <a
-                          href={`tel:${job.phone}`}
-                          className="px-4 border border-slate-300 text-slate-600 rounded-xl font-medium hover:bg-slate-50 transition-colors flex items-center justify-center"
-                        >
-                          <Phone size={18} />
-                        </a>
-                      </div>
-                    ) : (
-                      <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center justify-center gap-2">
-                        <CheckCircle className="text-green-600" size={20} />
-                        <span className="font-semibold text-green-700">Job Completed!</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+      {jobsByDate.size === 0 ? (
+        <div className="bg-white rounded-xl border border-slate-100 p-10 text-center">
+          <Calendar size={40} className="mx-auto mb-3 text-slate-300" />
+          <h3 className="font-semibold text-slate-900">Nothing scheduled</h3>
+          <p className="text-slate-500 text-sm mt-1">
+            {filter === 'completed'
+              ? "You haven't completed any jobs yet."
+              : filter === 'active'
+              ? "No active jobs right now."
+              : "Accept a job from the Jobs tab to see it here."}
+          </p>
         </div>
-      )}
-
-      {/* Tomorrow's Jobs */}
-      {tomorrowJobs.length > 0 && (
-        <div className="mb-8">
-          <div className="flex items-center gap-2 mb-4">
-            <Calendar size={18} className="text-slate-400" />
-            <h2 className="text-lg font-semibold text-slate-900">Tomorrow</h2>
-            <span className="text-sm text-slate-500">({tomorrowJobs.length} jobs)</span>
-          </div>
-          <div className="space-y-3">
-            {tomorrowJobs.map((job) => (
-              <div key={job.id} className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center flex-shrink-0">
-                      <Home size={18} className="text-slate-500" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-slate-900">{job.customer}</h3>
-                      <p className="text-sm text-slate-500">{job.address}, {job.city}</p>
-                      <div className="flex items-center gap-3 mt-2">
-                        <span className="flex items-center gap-1 text-xs text-slate-500">
-                          <Clock size={12} /> {job.time}
-                        </span>
-                        <span className="text-xs text-[#22C55E] font-medium">${job.payout}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-medium">
-                    {job.service}
+      ) : (
+        <div className="space-y-6">
+          {Array.from(jobsByDate.entries()).map(([date, dateJobs]) => (
+            <div key={date}>
+              <div className="flex items-center gap-2 mb-2 sticky top-0 bg-slate-50/90 backdrop-blur py-2 z-10">
+                <h3 className="text-sm font-semibold text-slate-700">
+                  {formatDate(date)}
+                </h3>
+                {isToday(date) && (
+                  <span className="text-xs font-semibold bg-[#22C55E] text-white px-2 py-0.5 rounded-full">
+                    Today
                   </span>
-                </div>
+                )}
+                <span className="text-xs text-slate-500 ml-auto">
+                  {dateJobs.length} job{dateJobs.length === 1 ? '' : 's'}
+                </span>
               </div>
-            ))}
-          </div>
+              <div className="space-y-2">
+                {dateJobs.map((job) => (
+                  <ScheduleRow
+                    key={job.id}
+                    job={job}
+                    onClick={() => setSelectedJob(job)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* No Jobs State */}
-      {upcomingJobs.length === 0 && (
-        <div className="text-center py-12">
-          <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Calendar size={32} className="text-slate-400" />
-          </div>
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">No upcoming jobs</h3>
-          <p className="text-slate-500">Accept some jobs from the feed to fill your schedule.</p>
-        </div>
+      {/* Detail modal */}
+      {selectedJob && (
+        <JobDetailModal
+          job={selectedJob}
+          onClose={() => setSelectedJob(null)}
+        />
       )}
+    </div>
+  )
+}
 
-      {/* Calendar View */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 mt-6">
-        <h3 className="font-semibold text-slate-900 mb-4">This Week</h3>
-        <div className="grid grid-cols-7 gap-2">
-          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, i) => {
-            const dayJobs = upcomingJobs.filter(j => {
-              const dayIndex = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(j.day === 'Today' ? new Date().toLocaleDateString('en-US', { weekday: 'short' }) : j.day === 'Tomorrow' ? new Date(Date.now() + 86400000).toLocaleDateString('en-US', { weekday: 'short' }) : '')
-              return dayIndex === i
-            }).length
-            const isToday = i === new Date().getDay() - 1
+function FilterChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+        active
+          ? 'bg-[#22C55E] text-white'
+          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+      }`}
+    >
+      {label}
+    </button>
+  )
+}
 
-            return (
-              <div key={day} className="text-center">
-                <p className={`text-xs mb-2 ${isToday ? 'font-semibold text-[#22C55E]' : 'text-slate-500'}`}>{day}</p>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto text-sm ${dayJobs > 0 ? 'bg-[#22C55E] text-white font-medium' : isToday ? 'bg-slate-100 text-slate-900' : 'bg-slate-50 text-slate-400'}`}>
-                  {dayJobs > 0 ? dayJobs : ''}
-                </div>
-              </div>
-            )
-          })}
+function ScheduleRow({ job, onClick }: { job: ProBookingWithDetails; onClick: () => void }) {
+  const status = getStatusBadge(job.booking_status)
+  return (
+    <button
+      onClick={onClick}
+      className="w-full bg-white rounded-xl border border-slate-100 p-3 hover:border-slate-200 transition-colors text-left"
+    >
+      <div className="flex items-center gap-3">
+        <div className="text-center w-16 flex-shrink-0">
+          <p className="text-xs text-slate-500">{job.scheduled_time_window?.split(' ')[1] || ''}</p>
+          <p className="text-base font-bold text-slate-900">
+            {job.scheduled_time_window?.split(' ')[0] || '—'}
+          </p>
+        </div>
+        <div className="w-px h-10 bg-slate-200" />
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-slate-900 truncate">
+            {job.customer_name || 'Customer'}
+          </p>
+          <p className="text-xs text-slate-500 truncate flex items-center gap-1 mt-0.5">
+            <MapPin size={11} />
+            {job.address_city || '—'}, {job.address_state || ''}
+          </p>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-xs text-slate-400 capitalize">{job.service_type}</span>
+            <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${status.className}`}>
+              {status.label}
+            </span>
+          </div>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <p className="text-sm font-bold text-[#22C55E]">
+            ${(job.provider_payout_amount || 0).toFixed(0)}
+          </p>
+          <ChevronRight size={16} className="text-slate-400 ml-auto mt-1" />
+        </div>
+      </div>
+    </button>
+  )
+}
+
+function JobDetailModal({ job, onClose }: { job: ProBookingWithDetails; onClose: () => void }) {
+  const status = getStatusBadge(job.booking_status)
+  const fullAddress = [job.address_line, job.address_city, job.address_state, job.address_zip]
+    .filter(Boolean).join(', ')
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 bg-white p-4 border-b border-slate-100 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">Job Details</h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-slate-100 rounded-lg"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Status */}
+          <div className="flex items-center justify-between">
+            <span className={`text-sm font-semibold px-3 py-1 rounded-full ${status.className}`}>
+              {status.label}
+            </span>
+            <p className="text-xl font-bold text-[#22C55E]">
+              ${(job.provider_payout_amount || 0).toFixed(2)}
+            </p>
+          </div>
+
+          {/* Customer */}
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Customer</p>
+            <p className="font-medium text-slate-900 flex items-center gap-2">
+              <User size={14} /> {job.customer_name || 'Customer'}
+            </p>
+            {job.customer_phone && (
+              <a href={`tel:${job.customer_phone}`} className="text-sm text-blue-600 hover:underline flex items-center gap-1 mt-1">
+                <Phone size={12} /> {job.customer_phone}
+              </a>
+            )}
+          </div>
+
+          {/* Address */}
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Address</p>
+            <p className="text-sm text-slate-700 flex items-start gap-1">
+              <MapPin size={14} className="mt-0.5 flex-shrink-0" />
+              {fullAddress || 'Address not available'}
+            </p>
+            {fullAddress && (
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1 mt-2"
+              >
+                <ExternalLink size={12} /> Open in Google Maps
+              </a>
+            )}
+          </div>
+
+          {/* Schedule */}
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">When</p>
+            <p className="text-sm text-slate-700 flex items-center gap-2">
+              <Calendar size={14} />
+              {new Date(job.scheduled_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+            </p>
+            <p className="text-sm text-slate-700 flex items-center gap-2 mt-1">
+              <Clock size={14} />
+              {job.scheduled_time_window || 'Time not set'}
+            </p>
+          </div>
+
+          {/* Service */}
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Service</p>
+            <p className="text-sm text-slate-700 capitalize">
+              {job.service_type} · <span className="capitalize">{job.yard_size_category}</span> yard
+            </p>
+            {job.service_frequency && job.service_frequency !== 'one_time' && (
+              <p className="text-xs text-purple-700 bg-purple-50 inline-block px-2 py-0.5 rounded mt-1">
+                🔁 Recurring ({job.service_frequency})
+              </p>
+            )}
+          </div>
+
+          {/* Notes */}
+          {job.notes && (
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Notes</p>
+              <p className="text-sm text-slate-700 bg-amber-50 border border-amber-100 rounded-lg p-3 whitespace-pre-line">
+                {job.notes}
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="sticky bottom-0 p-4 bg-white border-t border-slate-100">
+          <button
+            onClick={onClose}
+            className="w-full px-4 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium hover:bg-slate-200 transition-colors"
+          >
+            Close
+          </button>
         </div>
       </div>
     </div>
   )
+}
+
+function getStatusBadge(status: string): { label: string; className: string } {
+  switch (status) {
+    case 'provider_assigned':
+      return { label: 'Confirmed', className: 'bg-green-100 text-green-700' }
+    case 'on_the_way':
+      return { label: 'On the way', className: 'bg-blue-100 text-blue-700' }
+    case 'arrived':
+      return { label: 'Arrived', className: 'bg-amber-100 text-amber-700' }
+    case 'in_progress':
+      return { label: 'In progress', className: 'bg-purple-100 text-purple-700' }
+    case 'completed':
+      return { label: 'Completed', className: 'bg-slate-200 text-slate-700' }
+    default:
+      return { label: status, className: 'bg-slate-100 text-slate-600' }
+  }
 }
