@@ -19,6 +19,20 @@ const FREQUENCY_LABELS: Record<string, string> = {
   monthly: 'Monthly',
 }
 
+// Use Record lookups instead of string comparisons to avoid TypeScript's strict
+// literal-type comparison warnings (TS2367) on union types.
+const RECURRING_FREQUENCIES: Record<string, boolean> = {
+  weekly: true,
+  biweekly: true,
+  monthly: true,
+}
+
+const TERMINAL_STATUSES: Record<string, boolean> = {
+  cancelled: true,
+  refunded: true,
+  completed: true,
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return 'TBD'
   const d = new Date(iso + 'T00:00:00')
@@ -31,13 +45,11 @@ function formatPrice(amount: number | null): string {
 }
 
 function isRecurring(b: Booking): boolean {
-  const f = b.service_frequency
-  return f === 'weekly' || f === 'biweekly' || f === 'monthly'
+  return !!RECURRING_FREQUENCIES[b.service_frequency]
 }
 
 function isActive(b: Booking): boolean {
-  const s = b.booking_status
-  return s !== 'cancelled' && s !== 'refunded' && s !== 'completed'
+  return !TERMINAL_STATUSES[b.booking_status]
 }
 
 function isUpcoming(b: Booking): boolean {

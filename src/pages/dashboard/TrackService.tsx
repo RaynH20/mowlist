@@ -16,7 +16,12 @@ const YARD_SIZE_LABELS: Record<string, string> = {
 }
 
 // Statuses where the service is "in progress" — trackable live
-const ACTIVE_STATUSES = ['provider_assigned', 'on_the_way', 'arrived', 'in_progress']
+const ACTIVE_STATUSES: Record<string, boolean> = {
+  provider_assigned: true,
+  on_the_way: true,
+  arrived: true,
+  in_progress: true,
+}
 
 const STATUS_LABELS: Record<string, string> = {
   provider_assigned: 'Pro Assigned',
@@ -50,9 +55,8 @@ function isActiveForTracking(b: Booking): boolean {
   // A booking is trackable if:
   // 1. Status is one of the active statuses, OR
   // 2. Status is 'booked' AND scheduled for today (about to start)
-  const s = b.booking_status
-  if (s === 'provider_assigned' || s === 'on_the_way' || s === 'arrived' || s === 'in_progress') return true
-  if (s === 'booked' && isToday(b.scheduled_date)) return true
+  if (ACTIVE_STATUSES[b.booking_status]) return true
+  if (b.booking_status === 'booked' && isToday(b.scheduled_date)) return true
   return false
 }
 
