@@ -50,8 +50,9 @@ function isActiveForTracking(b: Booking): boolean {
   // A booking is trackable if:
   // 1. Status is one of the active statuses, OR
   // 2. Status is 'booked' AND scheduled for today (about to start)
-  if (ACTIVE_STATUSES.includes(b.booking_status)) return true
-  if (b.booking_status === 'booked' && isToday(b.scheduled_date)) return true
+  const s = b.booking_status
+  if (s === 'provider_assigned' || s === 'on_the_way' || s === 'arrived' || s === 'in_progress') return true
+  if (s === 'booked' && isToday(b.scheduled_date)) return true
   return false
 }
 

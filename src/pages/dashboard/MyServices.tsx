@@ -31,11 +31,13 @@ function formatPrice(amount: number | null): string {
 }
 
 function isRecurring(b: Booking): boolean {
-  return b.service_frequency === 'weekly' || b.service_frequency === 'biweekly' || b.service_frequency === 'monthly'
+  const f = b.service_frequency
+  return f === 'weekly' || f === 'biweekly' || f === 'monthly'
 }
 
 function isActive(b: Booking): boolean {
-  return !['cancelled', 'refunded', 'completed'].includes(b.booking_status)
+  const s = b.booking_status
+  return s !== 'cancelled' && s !== 'refunded' && s !== 'completed'
 }
 
 function isUpcoming(b: Booking): boolean {
@@ -78,7 +80,7 @@ export default function MyServices() {
     setUpdating(bookingId)
     try {
       await updateBookingStatus(bookingId, 'cancelled')
-      setBookings((prev) => prev.map((b) => b.id === bookingId ? { ...b, booking_status: 'cancelled' } : b))
+      setBookings((prev) => prev.map((b) => b.id === bookingId ? { ...b, booking_status: 'cancelled' as const } : b))
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to cancel')
     } finally {
@@ -127,7 +129,6 @@ export default function MyServices() {
         </div>
       ) : (
         <>
-          {/* Active services */}
           {activeServices.length > 0 && (
             <div className="space-y-4 mb-8">
               {activeServices.map((booking) => (
@@ -186,7 +187,6 @@ export default function MyServices() {
             </div>
           )}
 
-          {/* Past/cancelled services */}
           {pastServices.length > 0 && (
             <>
               <h2 className="text-lg font-semibold text-slate-900 mb-3">History</h2>
