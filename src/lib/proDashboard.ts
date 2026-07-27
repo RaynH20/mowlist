@@ -114,14 +114,10 @@ export async function getProAssignedJobsWithDetails(providerId: string): Promise
   error: Error | null
 }> {
   try {
-    // Get the provider's profile ID
-    const { data: profile } = await supabase
-      .from('provider_profiles')
-      .select('id')
-      .eq('user_id', providerId)
-      .single()
+    // Get the provider's profile ID using SECURITY DEFINER (bypasses RLS)
+    const { data: profileId } = await supabase.rpc('current_provider_id')
 
-    if (!profile) {
+    if (!profileId) {
       return { data: [], error: null }
     }
 
@@ -129,7 +125,7 @@ export async function getProAssignedJobsWithDetails(providerId: string): Promise
     const { data: bookings, error: bookingsErr } = await supabase
       .from('bookings')
       .select('*')
-      .eq('provider_id', profile.id)
+      .eq('provider_id', profileId)
       .in('booking_status', [
         'provider_assigned',
         'on_the_way',
@@ -351,13 +347,10 @@ export async function getProSkills(providerUserId: string): Promise<{
   error: Error | null
 }> {
   try {
-    const { data: profile } = await supabase
-      .from('provider_profiles')
-      .select('id')
-      .eq('user_id', providerUserId)
-      .single()
+    // Use SECURITY DEFINER function (bypasses RLS)
+    const { data: profileId } = await supabase.rpc('current_provider_id')
 
-    if (!profile) return { data: [], error: null }
+    if (!profileId) return { data: [], error: null }
 
     const { data: skills, error } = await supabase
       .from('pro_skills')
@@ -367,7 +360,7 @@ export async function getProSkills(providerUserId: string): Promise<{
         is_active,
         pro_service_types ( display_name )
       `)
-      .eq('provider_id', profile.id)
+      .eq('provider_id', profileId)
 
     if (error) throw error
 
@@ -393,19 +386,15 @@ export async function setProSkill(
   yearsExperience: number = 0
 ): Promise<{ error: Error | null }> {
   try {
-    const { data: profile } = await supabase
-      .from('provider_profiles')
-      .select('id')
-      .eq('user_id', providerUserId)
-      .single()
-
-    if (!profile) throw new Error('Provider profile not found')
+    // Use SECURITY DEFINER function to bypass RLS
+    const { data: profileId, error: rpcError } = await supabase.rpc('current_provider_id')
+    if (rpcError || !profileId) throw new Error(`Provider profile not found: ${rpcError?.message || 'no profile id'}`)
 
     const { error } = await supabase
       .from('pro_skills')
       .upsert(
         {
-          provider_id: profile.id,
+          provider_id: profileId,
           service_key: serviceKey,
           years_experience: yearsExperience,
           is_active: true,
@@ -428,18 +417,14 @@ export async function removeProSkill(
   serviceKey: string
 ): Promise<{ error: Error | null }> {
   try {
-    const { data: profile } = await supabase
-      .from('provider_profiles')
-      .select('id')
-      .eq('user_id', providerUserId)
-      .single()
-
-    if (!profile) throw new Error('Provider profile not found')
+    // Use SECURITY DEFINER function to bypass RLS
+    const { data: profileId, error: rpcError } = await supabase.rpc('current_provider_id')
+    if (rpcError || !profileId) throw new Error(`Provider profile not found: ${rpcError?.message || 'no profile id'}`)
 
     const { error } = await supabase
       .from('pro_skills')
       .delete()
-      .eq('provider_id', profile.id)
+      .eq('provider_id', profileId)
       .eq('service_key', serviceKey)
 
     if (error) throw error

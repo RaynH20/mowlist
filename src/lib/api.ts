@@ -229,7 +229,7 @@ export async function getAvailableJobs(providerId: string): Promise<{ data: Book
       .from('provider_profiles')
       .select('service_radius_miles')
       .eq('user_id', providerId)
-      .single()
+      .maybeSingle()
 
     // For now, get all bookings that don't have a provider assigned
     // In production, this would filter by location
@@ -249,21 +249,17 @@ export async function getAvailableJobs(providerId: string): Promise<{ data: Book
 
 export async function getProviderAssignedJobs(providerId: string): Promise<{ data: Booking[]; error: Error | null }> {
   try {
-    // Get provider profile ID
-    const { data: profile } = await supabase
-      .from('provider_profiles')
-      .select('id')
-      .eq('user_id', providerId)
-      .single()
+    // Get provider profile ID via SECURITY DEFINER (bypasses RLS)
+    const { data: profileId } = await supabase.rpc('current_provider_id')
 
-    if (!profile) {
+    if (!profileId) {
       return { data: [], error: null }
     }
 
     const { data, error } = await supabase
       .from('bookings')
       .select('*')
-      .eq('provider_id', profile.id)
+      .eq('provider_id', profileId)
       .in('booking_status', ['booked', 'provider_assigned', 'on_the_way', 'arrived', 'in_progress'])
       .order('scheduled_date', { ascending: true })
 
@@ -276,22 +272,17 @@ export async function getProviderAssignedJobs(providerId: string): Promise<{ dat
 
 export async function acceptJob(providerId: string, bookingId: string): Promise<{ data: Booking | null; error: Error | null }> {
   try {
-    // Get provider profile
-    const { data: profile } = await supabase
-      .from('provider_profiles')
-      .select('id')
-      .eq('user_id', providerId)
-      .single()
-
-    if (!profile) {
-      throw new Error('Provider profile not found')
+    // Get provider profile via SECURITY DEFINER function (bypasses RLS)
+    const { data: profileId, error: rpcError } = await supabase.rpc('current_provider_id')
+    if (rpcError || !profileId) {
+      throw new Error(`Provider profile not found: ${rpcError?.message || 'no profile id'}`)
     }
 
     // Update booking with provider
     const { data, error } = await supabase
       .from('bookings')
       .update({
-        provider_id: profile.id,
+        provider_id: profileId,
         booking_status: 'provider_assigned',
         updated_at: new Date().toISOString(),
       })
@@ -378,21 +369,17 @@ export async function updateProviderProfile(userId: string, updates: Partial<Pro
 
 export async function getProviderServiceAreas(providerId: string): Promise<{ data: ServiceArea[]; error: Error | null }> {
   try {
-    // Get provider profile ID
-    const { data: profile } = await supabase
-      .from('provider_profiles')
-      .select('id')
-      .eq('user_id', providerId)
-      .single()
+    // Get provider profile ID via SECURITY DEFINER (bypasses RLS)
+    const { data: profileId } = await supabase.rpc('current_provider_id')
 
-    if (!profile) {
+    if (!profileId) {
       return { data: [], error: null }
     }
 
     const { data, error } = await supabase
       .from('service_areas')
       .select('*')
-      .eq('provider_id', profile.id)
+      .eq('provider_id', profileId)
       .order('is_primary', { ascending: false })
 
     if (error) throw error
@@ -404,20 +391,15 @@ export async function getProviderServiceAreas(providerId: string): Promise<{ dat
 
 export async function addServiceArea(providerId: string, area: Partial<ServiceArea>): Promise<{ data: ServiceArea | null; error: Error | null }> {
   try {
-    // Get provider profile ID
-    const { data: profile } = await supabase
-      .from('provider_profiles')
-      .select('id')
-      .eq('user_id', providerId)
-      .single()
-
-    if (!profile) {
-      throw new Error('Provider profile not found')
+    // Get provider profile ID via SECURITY DEFINER (bypasses RLS)
+    const { data: profileId, error: rpcError } = await supabase.rpc('current_provider_id')
+    if (rpcError || !profileId) {
+      throw new Error(`Provider profile not found: ${rpcError?.message || 'no profile id'}`)
     }
 
     const { data, error } = await supabase
       .from('service_areas')
-      .insert({ ...area, provider_id: profile.id })
+      .insert({ ...area, provider_id: profileId })
       .select()
       .single()
 
@@ -494,14 +476,10 @@ export async function getBookingPayment(bookingId: string): Promise<{ data: Paym
 
 export async function getProviderEarnings(providerId: string): Promise<{ data: { total: number; pending: number; paid: number }; error: Error | null }> {
   try {
-    // Get provider profile
-    const { data: profile } = await supabase
-      .from('provider_profiles')
-      .select('id')
-      .eq('user_id', providerId)
-      .single()
+    // Get provider profile via SECURITY DEFINER (bypasses RLS)
+    const { data: profileId } = await supabase.rpc('current_provider_id')
 
-    if (!profile) {
+    if (!profileId) {
       return { data: { total: 0, pending: 0, paid: 0 }, error: null }
     }
 
@@ -509,7 +487,7 @@ export async function getProviderEarnings(providerId: string): Promise<{ data: {
     const { data: bookings } = await supabase
       .from('bookings')
       .select('provider_payout_amount, booking_status')
-      .eq('provider_id', profile.id)
+      .eq('provider_id', profileId)
       .eq('booking_status', 'completed')
 
     const total = bookings?.reduce((sum, b) => sum + (b.provider_payout_amount || 0), 0) || 0
@@ -531,21 +509,17 @@ export async function getProviderEarnings(providerId: string): Promise<{ data: {
 
 export async function getProviderPayouts(providerId: string): Promise<{ data: Payout[]; error: Error | null }> {
   try {
-    // Get provider profile
-    const { data: profile } = await supabase
-      .from('provider_profiles')
-      .select('id')
-      .eq('user_id', providerId)
-      .single()
+    // Get provider profile via SECURITY DEFINER (bypasses RLS)
+    const { data: profileId } = await supabase.rpc('current_provider_id')
 
-    if (!profile) {
+    if (!profileId) {
       return { data: [], error: null }
     }
 
     const { data, error } = await supabase
       .from('payouts')
       .select('*')
-      .eq('provider_id', profile.id)
+      .eq('provider_id', profileId)
       .order('created_at', { ascending: false })
 
     if (error) throw error
