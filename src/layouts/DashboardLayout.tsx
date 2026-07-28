@@ -1,8 +1,10 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { Home, Calendar, MapPin, CreditCard, Settings, LogOut } from 'lucide-react'
+import { Home, Calendar, MapPin, CreditCard, Settings, LogOut, Menu, X } from 'lucide-react'
+import { useState } from 'react'
 
 export default function DashboardLayout() {
   const location = useLocation()
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: Home },
@@ -12,45 +14,77 @@ export default function DashboardLayout() {
     { path: '/dashboard/settings', label: 'Settings', icon: Settings },
   ]
 
-  return (
-    <div className="pt-16 min-h-screen bg-slate-50 flex">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white border-r hidden md:block fixed h-full">
-        <div className="p-6">
-          <Link to="/" className="text-xl font-bold">
-            <span className="text-[#22C55E]">Mow</span>
-            <span className="text-[#1E40AF]">List</span>
-          </Link>
-        </div>
-        <nav className="px-4">
-          {navItems.map((item) => (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg mb-1 transition-colors ${
-                location.pathname === item.path
-                  ? 'bg-green-50 text-[#22C55E] font-medium'
-                  : 'text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <item.icon size={20} />
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-        <div className="absolute bottom-0 w-64 p-4 border-t">
+  const sidebarContent = (
+    <>
+      <div className="p-6 border-b">
+        <Link to="/" className="text-xl font-bold" onClick={() => setIsMobileMenuOpen(false)}>
+          <span className="text-[#22C55E]">Mow</span>
+          <span className="text-[#1E40AF]">List</span>
+        </Link>
+      </div>
+      <nav className="px-4 py-4">
+        {navItems.map((item) => (
           <Link
-            to="/login"
-            className="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+            key={item.path}
+            to={item.path}
+            onClick={() => setIsMobileMenuOpen(false)}
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg mb-1 transition-colors ${
+              location.pathname === item.path
+                ? 'bg-green-50 text-[#22C55E] font-medium'
+                : 'text-slate-600 hover:bg-slate-50'
+            }`}
           >
-            <LogOut size={20} />
-            Log Out
+            <item.icon size={20} />
+            {item.label}
           </Link>
+        ))}
+      </nav>
+      <div className="absolute bottom-0 left-0 right-0 p-4 border-t bg-white">
+        <Link
+          to="/login"
+          onClick={() => setIsMobileMenuOpen(false)}
+          className="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+        >
+          <LogOut size={20} />
+          Log Out
+        </Link>
+      </div>
+    </>
+  )
+
+  return (
+    <div className="pt-16 min-h-screen bg-slate-50">
+      {/* Mobile menu button - fixed top right below header */}
+      <button
+        onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+        className="md:hidden fixed top-20 right-4 z-40 bg-white border border-slate-200 rounded-lg p-2 shadow-sm"
+        aria-label="Toggle menu"
+      >
+        {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+      </button>
+
+      {/* Mobile sidebar - slides in as overlay */}
+      {isMobileMenuOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/50 z-30"
+          onClick={() => setIsMobileMenuOpen(false)}
+        >
+          <aside
+            className="w-64 bg-white h-full relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {sidebarContent}
+          </aside>
         </div>
+      )}
+
+      {/* Desktop sidebar - always visible */}
+      <aside className="w-64 bg-white border-r hidden md:block fixed h-full">
+        {sidebarContent}
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 md:ml-64 p-6">
+      <main className="flex-1 md:ml-64 p-4 md:p-6">
         <Outlet />
       </main>
     </div>

@@ -25,7 +25,7 @@ const FREQUENCY_LABELS: Record<string, string> = {
 
 const STATUS_LABELS: Record<string, string> = {
   requested: 'Requested',
-  booked: 'Booked',
+  booked: 'Awaiting Pro',
   provider_assigned: 'Pro Assigned',
   on_the_way: 'Pro On The Way',
   arrived: 'Pro Arrived',
