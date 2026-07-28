@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
-import { loadStripe, Stripe, StripeElements, StripeCardElement } from '@stripe/stripe-js'
+import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useElements, useStripe } from '@stripe/react-stripe-js'
-import { Check, ChevronLeft, CreditCard, Lock, Shield, MapPin, Calendar, Clock, RefreshCw, AlertCircle, Loader2 } from 'lucide-react'
+import { ChevronLeft, CreditCard, Lock, Shield, AlertCircle, Loader2 } from 'lucide-react'
 import { useAuth } from '../lib/auth-context'
 
 // Load Stripe outside the component so it only happens once
