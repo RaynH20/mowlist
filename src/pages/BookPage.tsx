@@ -377,11 +377,34 @@ export default function BookPage() {
         }
       }
 
-      // Move to confirmation step
+      // Move to confirmation step (only for custom quotes; standard bookings go to /checkout)
       if (isCustomQuote) {
         setStep(8)
       } else {
-        setStep(7)
+        // Navigate to /checkout with the booking form data
+        // /checkout will process the Stripe payment and create the booking
+        navigate('/checkout', {
+          state: {
+            formData: {
+              address: formData.address,
+              zipCode: formData.zipCode,
+              city: formData.city,
+              state: formData.state,
+              lawnSize: formData.lawnSize,
+              serviceType: formData.serviceType,
+              frequency: formData.frequency,
+              date: formData.date,
+              time: formData.time,
+              name: formData.name,
+              email: formData.email,
+              phone: formData.phone,
+              specialInstructions: formData.specialInstructions,
+              instructionPhotos: formData.instructionPhotos,
+              instructionTags: formData.instructionTags,
+            },
+          },
+        })
+        return
       }
     } catch (err: any) {
       setError(err.message || 'An error occurred. Please try again.')

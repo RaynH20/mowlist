@@ -1,9 +1,10 @@
-import { useState } from 'react'
-import { Link, useSearchParams, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useElements, useStripe } from '@stripe/react-stripe-js'
 import { ChevronLeft, CreditCard, Lock, Shield, AlertCircle, Loader2 } from 'lucide-react'
 import { useAuth } from '../lib/auth-context'
+import { createAddress, createBooking } from '../lib/api'
 
 // Load Stripe outside the component so it only happens once
 const stripePromise = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
@@ -14,6 +15,7 @@ function CheckoutForm() {
   const stripe = useStripe()
   const elements = useElements()
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useAuth()
   const [searchParams] = useSearchParams()
   const [isProcessing, setIsProcessing] = useState(false)
@@ -22,9 +24,11 @@ function CheckoutForm() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState(user?.email || '')
 
-  const initialZip = searchParams.get('zip') || ''
-  const serviceType = searchParams.get('service') || 'mowing'
-  const lawnSize = searchParams.get('size') || 'medium'
+  // Get form data from BookPage (preferred) or URL params (legacy)
+  const passedFormData = (location.state as any)?.formData
+  const initialZip = passedFormData?.zipCode || searchParams.get('zip') || ''
+  const serviceType = passedFormData?.serviceType || searchParams.get('service') || 'mowing'
+  const lawnSize = passedFormData?.lawnSize || searchParams.get('size') || 'medium'
 
   // Pricing
   const servicePrices: Record<string, number> = {
@@ -108,7 +112,55 @@ function CheckoutForm() {
       }
 
       if (paymentIntent?.status === 'succeeded') {
-        // Navigate to confirmation with the booking ID
+        // Payment succeeded! Now create the booking in the database.
+        if (passedFormData && user) {
+          try {
+            // Create address
+            const { data: address } = await createAddress({
+              user_id: user.id,
+              street_1: passedFormData.address,
+              zip_code: passedFormData.zipCode,
+              city: passedFormData.city || 'Unknown',
+              state: passedFormData.state || 'TX',
+              country: 'USA',
+            })
+            if (address) {
+              // Map form values to schema enums
+              const sizeMap: Record<string, string> = {
+                small: 'small',
+                medium: 'medium',
+                large: 'large',
+                standard: 'standard',
+                'custom-quote': 'custom_quote',
+              }
+              const freqMap: Record<string, string> = {
+                'one-time': 'one_time',
+                weekly: 'weekly',
+                biweekly: 'biweekly',
+                monthly: 'monthly',
+              }
+              // Create the booking
+              await createBooking({
+                customer_id: user.id,
+                address_id: address.id,
+                yard_size_category: (sizeMap[lawnSize] || 'medium') as any,
+                service_type: 'lawn_mowing',
+                service_frequency: (freqMap[passedFormData.frequency] || 'one_time') as any,
+                scheduled_date: passedFormData.date || null,
+                scheduled_time_window: passedFormData.time || null,
+                estimated_price: total,
+                booking_status: 'booked',
+                payment_status: 'paid',
+                notes: passedFormData.specialInstructions || null,
+              })
+            }
+          } catch (dbErr: any) {
+            console.error('Failed to create booking after payment:', dbErr)
+            // Payment succeeded but DB write failed - still show success, ops can fix
+          }
+        }
+
+        // Navigate to confirmation
         navigate('/booking-confirmation', {
           state: {
             bookingId,
