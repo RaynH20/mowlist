@@ -2,11 +2,16 @@ import { useState, useEffect } from 'react'
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useElements, useStripe } from '@stripe/react-stripe-js'
-import { ChevronLeft, CreditCard, Lock, Shield, AlertCircle, Loader2 } from 'lucide-react'
+import { ChevronLeft, CreditCard, Lock, Shield, AlertCircle, Loader2, Trash2, Check } from 'lucide-react'
 import { useAuth } from '../lib/auth-context'
 import { createAddress, createBooking } from '../lib/api'
+import {
+  createPaymentIntent,
+  listPaymentMethods,
+  type SavedPaymentMethod,
+  getCardBrandLabel,
+} from '../lib/stripeCustomer'
 
-// Load Stripe outside the component so it only happens once
 const stripePromise = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
   ? loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY)
   : null
@@ -23,6 +28,12 @@ function CheckoutForm() {
   const [cardComplete, setCardComplete] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState(user?.email || '')
+
+  // Saved cards state
+  const [savedCards, setSavedCards] = useState<SavedPaymentMethod[]>([])
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null) // null = new card
+  const [saveCard, setSaveCard] = useState(true)
+  const [loadingCards, setLoadingCards] = useState(true)
 
   // Get form data from BookPage (preferred) or URL params (legacy)
   const passedFormData = (location.state as any)?.formData
@@ -47,75 +58,100 @@ function CheckoutForm() {
   const serviceFee = 2.99
   const total = basePrice + serviceFee
 
-  // Generate or retrieve a booking ID (for the payment metadata)
-  // In a real flow, we'd create the booking first, then pay. For MVP, we generate an ID client-side.
+  // Generate booking ID
   const [bookingId] = useState(() => `bk_${crypto.randomUUID()}`)
+
+  // Load saved payment methods
+  useEffect(() => {
+    if (!user) {
+      setLoadingCards(false)
+      return
+    }
+    listPaymentMethods(user.id)
+      .then((res) => {
+        setSavedCards(res.paymentMethods || [])
+        // Default to using the first saved card if any
+        if (res.paymentMethods && res.paymentMethods.length > 0) {
+          const defaultCard = res.paymentMethods.find((c) => c.isDefault) || res.paymentMethods[0]
+          setSelectedCardId(defaultCard.id)
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load saved cards:', err)
+      })
+      .finally(() => setLoadingCards(false))
+  }, [user])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setPaymentError('')
 
-    if (!stripe || !elements) {
+    if (!stripe || !elements || !user) {
       setPaymentError('Payment system is still loading. Please try again.')
       return
     }
 
-    const cardElement = elements.getElement(CardElement)
-    if (!cardElement) {
-      setPaymentError('Card element not found.')
-      return
+    // If using a saved card, we don't need the card element
+    if (!selectedCardId) {
+      const cardElement = elements.getElement(CardElement)
+      if (!cardElement) {
+        setPaymentError('Card element not found.')
+        return
+      }
     }
 
     setIsProcessing(true)
     try {
-      // 1. Create PaymentIntent via our Edge Function
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-payment-intent`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({
-            amount: total,
-            booking_id: bookingId,
-            customer_email: email,
-            customer_name: name,
-          }),
-        }
-      )
-
-      const data = await response.json()
-      if (!response.ok || data.error) {
-        throw new Error(data.error || 'Failed to create payment intent')
+      // Create PaymentIntent via Edge Function
+      const intentParams: any = {
+        amount: total,
+        booking_id: bookingId,
+        user_id: user.id,
+        customer_email: email,
+        customer_name: name,
+      }
+      if (selectedCardId) {
+        // Use saved card
+        intentParams.payment_method_id = selectedCardId
+      } else if (saveCard) {
+        // Save the new card after payment
+        intentParams.save_card = true
       }
 
+      const data = await createPaymentIntent(intentParams)
       const { clientSecret } = data
       if (!clientSecret) {
         throw new Error('No client secret returned from payment server')
       }
 
-      // 2. Confirm the payment with Stripe.js
-      const { error: confirmError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
-        payment_method: {
-          card: cardElement,
-          billing_details: {
-            name: name || undefined,
-            email: email || undefined,
-          },
-        },
-      })
+      let paymentIntent
+      if (selectedCardId) {
+        // Use saved card - confirm without user interaction
+        const { error, paymentIntent: pi } = await stripe.confirmCardPayment(clientSecret)
+        if (error) throw new Error(error.message)
+        paymentIntent = pi
+      } else {
+        // New card - get card element
+        const cardElement = elements.getElement(CardElement)
+        if (!cardElement) throw new Error('Card element not found')
 
-      if (confirmError) {
-        throw new Error(confirmError.message || 'Payment failed')
+        const { error, paymentIntent: pi } = await stripe.confirmCardPayment(clientSecret, {
+          payment_method: {
+            card: cardElement,
+            billing_details: {
+              name: name || undefined,
+              email: email || undefined,
+            },
+          },
+        })
+        if (error) throw new Error(error.message)
+        paymentIntent = pi
       }
 
       if (paymentIntent?.status === 'succeeded') {
-        // Payment succeeded! Now create the booking in the database.
-        if (passedFormData && user) {
+        // Create the booking in the database
+        if (passedFormData) {
           try {
-            // Create address
             const { data: address } = await createAddress({
               user_id: user.id,
               street_1: passedFormData.address,
@@ -125,7 +161,6 @@ function CheckoutForm() {
               country: 'USA',
             })
             if (address) {
-              // Map form values to schema enums
               const sizeMap: Record<string, string> = {
                 small: 'small',
                 medium: 'medium',
@@ -139,7 +174,6 @@ function CheckoutForm() {
                 biweekly: 'biweekly',
                 monthly: 'monthly',
               }
-              // Create the booking
               await createBooking({
                 customer_id: user.id,
                 address_id: address.id,
@@ -156,11 +190,9 @@ function CheckoutForm() {
             }
           } catch (dbErr: any) {
             console.error('Failed to create booking after payment:', dbErr)
-            // Payment succeeded but DB write failed - still show success, ops can fix
           }
         }
 
-        // Navigate to confirmation
         navigate('/booking-confirmation', {
           state: {
             bookingId,
@@ -208,7 +240,6 @@ function CheckoutForm() {
 
         <form onSubmit={handleSubmit}>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left: Form */}
             <div className="lg:col-span-2 space-y-4">
               {/* Service summary */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
@@ -251,36 +282,114 @@ function CheckoutForm() {
                 </div>
               </div>
 
-              {/* Stripe Card Element */}
+              {/* Payment method selector */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
                 <h2 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                  <CreditCard size={18} /> Payment
+                  <CreditCard size={18} /> Payment method
                 </h2>
-                <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
-                  <CardElement
-                    options={{
-                      style: {
-                        base: {
-                          fontSize: '16px',
-                          color: '#1e293b',
-                          fontFamily: 'system-ui, -apple-system, sans-serif',
-                          '::placeholder': { color: '#94a3b8' },
-                        },
-                        invalid: { color: '#dc2626' },
-                      },
-                      hidePostalCode: true, // we collect it via the form
-                    }}
-                    onChange={(e) => {
-                      setCardComplete(e.complete)
-                      if (e.error) {
-                        setPaymentError(e.error.message)
-                      } else {
-                        setPaymentError('')
-                      }
-                    }}
-                  />
-                </div>
-                <p className="text-xs text-slate-500 mt-2 flex items-center gap-1">
+
+                {loadingCards ? (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader2 size={20} className="animate-spin text-slate-400" />
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Saved cards */}
+                    {savedCards.length > 0 && savedCards.map((card) => (
+                      <label
+                        key={card.id}
+                        className={`flex items-center gap-3 p-3 border-2 rounded-lg cursor-pointer transition-colors ${
+                          selectedCardId === card.id
+                            ? 'border-[#22C55E] bg-green-50'
+                            : 'border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="payment_method"
+                          checked={selectedCardId === card.id}
+                          onChange={() => setSelectedCardId(card.id)}
+                          className="w-4 h-4 accent-[#22C55E]"
+                        />
+                        <div className="flex-1">
+                          <div className="font-medium text-slate-900 text-sm">
+                            {getCardBrandLabel(card.brand)} ending in {card.last4}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            Expires {String(card.expMonth).padStart(2, '0')}/{String(card.expYear).slice(-2)}
+                            {card.isDefault && <span className="ml-2 text-[#22C55E] font-medium">Default</span>}
+                          </div>
+                        </div>
+                        {selectedCardId === card.id && (
+                          <Check size={18} className="text-[#22C55E]" />
+                        )}
+                      </label>
+                    ))}
+
+                    {/* New card option */}
+                    <label
+                      className={`flex items-center gap-3 p-3 border-2 rounded-lg cursor-pointer transition-colors ${
+                        selectedCardId === null
+                          ? 'border-[#22C55E] bg-green-50'
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="payment_method"
+                        checked={selectedCardId === null}
+                        onChange={() => setSelectedCardId(null)}
+                        className="w-4 h-4 accent-[#22C55E]"
+                      />
+                      <div className="flex-1">
+                        <div className="font-medium text-slate-900 text-sm">Use a new card</div>
+                        <div className="text-xs text-slate-500">Enter card details below</div>
+                      </div>
+                    </label>
+
+                    {/* Stripe card element (shown when new card is selected) */}
+                    {selectedCardId === null && (
+                      <div className="mt-3 border border-slate-200 rounded-lg p-4 bg-slate-50">
+                        <CardElement
+                          options={{
+                            style: {
+                              base: {
+                                fontSize: '16px',
+                                color: '#1e293b',
+                                fontFamily: 'system-ui, -apple-system, sans-serif',
+                                '::placeholder': { color: '#94a3b8' },
+                              },
+                              invalid: { color: '#dc2626' },
+                            },
+                            hidePostalCode: true,
+                          }}
+                          onChange={(e) => {
+                            setCardComplete(e.complete)
+                            if (e.error) setPaymentError(e.error.message)
+                            else setPaymentError('')
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {/* Save card checkbox (only for new cards) */}
+                    {selectedCardId === null && (
+                      <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={saveCard}
+                          onChange={(e) => setSaveCard(e.target.checked)}
+                          className="w-4 h-4 accent-[#22C55E]"
+                        />
+                        <span className="text-sm text-slate-700">
+                          Save this card for faster checkout next time
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                )}
+
+                <p className="text-xs text-slate-500 mt-3 flex items-center gap-1">
                   <Lock size={12} /> Secured by Stripe. We never see your card details.
                 </p>
                 <p className="text-xs text-slate-400 mt-1">
@@ -297,7 +406,11 @@ function CheckoutForm() {
 
               <button
                 type="submit"
-                disabled={!stripe || !cardComplete || isProcessing}
+                disabled={
+                  !stripe ||
+                  isProcessing ||
+                  (!selectedCardId && !cardComplete)
+                }
                 className="w-full bg-[#22C55E] text-white py-4 rounded-xl font-semibold text-lg hover:bg-[#16A34A] transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isProcessing ? (
@@ -316,7 +429,7 @@ function CheckoutForm() {
               </div>
             </div>
 
-            {/* Right: Order summary */}
+            {/* Order summary */}
             <div className="lg:col-span-1">
               <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 sticky top-4">
                 <h2 className="font-semibold text-slate-900 mb-4">Order Summary</h2>
@@ -347,9 +460,6 @@ function CheckoutForm() {
 }
 
 export default function CheckoutPage() {
-  const [searchParams] = useSearchParams()
-  const initialZip = searchParams.get('zip') || ''
-
   if (!stripePromise) {
     return (
       <div className="min-h-screen bg-slate-50 p-4 flex items-center justify-center">
@@ -359,10 +469,7 @@ export default function CheckoutPage() {
           <p className="text-slate-600 text-sm">
             Stripe is not configured. Please set VITE_STRIPE_PUBLISHABLE_KEY in the environment.
           </p>
-          <Link
-            to="/"
-            className="inline-block mt-4 text-[#22C55E] hover:underline"
-          >
+          <Link to="/" className="inline-block mt-4 text-[#22C55E] hover:underline">
             ← Back to home
           </Link>
         </div>

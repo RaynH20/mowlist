@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   User, Save, Loader2, CheckCircle, Camera, Phone, FileText,
   MapPin, Briefcase, Plus, X, Award
@@ -416,19 +417,14 @@ export default function ProProfile() {
         )}
       </div>
 
-      {/* Verification status */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-        <h2 className="font-semibold text-slate-900 mb-3">Verification & Payouts</h2>
-        <p className="text-sm text-slate-500 mb-4">
-          These are managed by Stripe and won't change in this preview.
-        </p>
-        <div className="space-y-2">
-          <ChecklistRow label="Email confirmed" done />
-          <ChecklistRow label="Identity verified" done />
-          <ChecklistRow label="Background check" done />
-          <ChecklistRow label="Bank account connected" pending="Coming with Stripe Connect" />
-        </div>
-      </div>
+      {/* Stripe Connect - Verification & Payouts */}
+      <StripeConnectSection
+        connectAccountId={profile.stripe_connect_account_id as any}
+        chargesEnabled={profile.stripe_connect_charges_enabled as any}
+        payoutsEnabled={profile.stripe_connect_payouts_enabled as any}
+        onboardingComplete={profile.stripe_connect_onboarding_complete as any}
+        onUpdate={fetchAll}
+      />
     </div>
   )
 }
@@ -470,6 +466,106 @@ function ChecklistRow({ label, done, pending }: { label: string; done?: boolean;
       ) : (
         <span className="text-xs text-slate-500">{pending || 'Pending'}</span>
       )}
+    </div>
+  )
+}
+
+
+function StripeConnectSection({
+  connectAccountId,
+  chargesEnabled,
+  payoutsEnabled,
+  onboardingComplete,
+  onUpdate,
+}: {
+  connectAccountId: string | null
+  chargesEnabled: boolean | null
+  payoutsEnabled: boolean | null
+  onboardingComplete: boolean | null
+  onUpdate: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const { user } = useAuth()
+  const location = useLocation()
+
+  // Check URL params for connection success
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    if (params.get('connected') === 'true') {
+      onUpdate()
+      // Clean URL
+      window.history.replaceState({}, '', '/pro/profile')
+    }
+  }, [location.search])
+
+  const handleConnect = async () => {
+    if (!user) return
+    setLoading(true)
+    setError(null)
+    try {
+      const { startConnectOnboarding } = await import('../../lib/stripeConnect')
+      const result = await startConnectOnboarding(user.id, user.email || '')
+      // Redirect to Stripe onboarding
+      window.location.href = result.onboardingUrl
+    } catch (err: any) {
+      setError(err.message || 'Failed to start Stripe onboarding')
+      setLoading(false)
+    }
+  }
+
+  const isFullyOnboarded = chargesEnabled && payoutsEnabled && onboardingComplete
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+      <h2 className="font-semibold text-slate-900 mb-3">Verification & Payouts</h2>
+      <p className="text-sm text-slate-500 mb-4">
+        {isFullyOnboarded
+          ? 'You\'re fully verified and ready to receive payouts.'
+          : 'Connect with Stripe to verify your identity and start receiving payouts.'}
+      </p>
+
+      {error && (
+        <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      <div className="space-y-2 mb-4">
+        <ChecklistRow label="Email confirmed" done />
+        <ChecklistRow label="Identity verified" done={!!chargesEnabled} />
+        <ChecklistRow label="Background check" done={!!onboardingComplete} />
+        <ChecklistRow
+          label="Bank account connected"
+          done={!!payoutsEnabled}
+          pending={connectAccountId && !payoutsEnabled ? 'Pending Stripe verification' : undefined}
+        />
+      </div>
+
+      {!isFullyOnboarded ? (
+        <button
+          onClick={handleConnect}
+          disabled={loading}
+          className="w-full bg-[#22C55E] text-white py-3 rounded-lg font-semibold hover:bg-[#16A34A] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+        >
+          {loading ? (
+            <Loader2 size={18} className="animate-spin" />
+          ) : (
+            <>
+              {connectAccountId ? 'Continue Stripe setup' : 'Connect with Stripe'}
+            </>
+          )}
+        </button>
+      ) : (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700 flex items-center gap-2">
+          <CheckCircle size={16} />
+          <span>Ready to receive payouts. Earnings are sent weekly.</span>
+        </div>
+      )}
+
+      <p className="text-xs text-slate-500 mt-3">
+        Stripe handles your bank info, tax forms (1099s), and identity verification. MowList never sees your bank account.
+      </p>
     </div>
   )
 }

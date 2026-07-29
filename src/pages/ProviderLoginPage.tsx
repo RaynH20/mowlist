@@ -20,12 +20,27 @@ export default function ProviderLoginPage() {
     const { error } = await signIn(email, password)
 
     if (error) {
-      setError(error.message)
+      setError(error.message || 'Invalid credentials')
       setLoading(false)
-    } else {
-      // Redirect to pro dashboard
-      navigate('/pro')
+      return
     }
+
+    // Check role - if not a provider, redirect them to the right place
+    const { data: profile } = await import('../lib/supabase').then(m => m.supabase
+      .from('users')
+      .select('role')
+      .eq('email', email)
+      .single()
+    )
+
+    if (profile?.role === 'customer') {
+      setError('This account is a customer, not a provider. Please use the customer login.')
+      setLoading(false)
+      return
+    }
+
+    // Redirect to pro dashboard
+    navigate('/pro')
   }
 
   return (
@@ -170,6 +185,14 @@ export default function ProviderLoginPage() {
             <Shield className="text-[#2563EB]" size={16} />
             <span>Secure provider portal</span>
           </div>
+        </div>
+
+        <p className="text-center text-sm text-slate-500 mt-6">
+          Looking for customer login?{' '}
+          <Link to="/login/customer" className="text-[#22C55E] font-medium hover:underline">
+            Sign in as customer
+          </Link>
+        </p>
         </div>
       </div>
     </div>
