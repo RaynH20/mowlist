@@ -193,7 +193,6 @@ export default function ProviderLoginPage() {
             Sign in as customer
           </Link>
         </p>
-        </div>
       </div>
     </div>
   )
