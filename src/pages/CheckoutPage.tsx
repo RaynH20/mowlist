@@ -4,6 +4,7 @@ import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useElements, useStripe } from '@stripe/react-stripe-js'
 import { ChevronLeft, CreditCard, Lock, Shield, AlertCircle, Loader2, Trash2, Check } from 'lucide-react'
 import { useAuth } from '../lib/auth-context'
+import { supabase } from '../lib/supabase'
 import { createAddress, createBooking } from '../lib/api'
 import {
   createPaymentIntent,
@@ -34,6 +35,25 @@ function CheckoutForm() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null) // null = new card
   const [saveCard, setSaveCard] = useState(true)
   const [loadingCards, setLoadingCards] = useState(true)
+
+  // Prefill name from customer_profiles (if available)
+  useEffect(() => {
+    if (!user) return
+    supabase
+      .from('customer_profiles')
+      .select('first_name, last_name')
+      .eq('user_id', user.id)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          const fullName = [data.first_name, data.last_name].filter(Boolean).join(' ')
+          if (fullName && !name) setName(fullName)
+        }
+      })
+      .catch(() => {
+        // Ignore - name will just be empty
+      })
+  }, [user])
 
   // Get form data from BookPage (preferred) or URL params (legacy)
   const passedFormData = (location.state as any)?.formData
