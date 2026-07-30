@@ -41,12 +41,14 @@ export async function getAvailableJobsWithDetails(): Promise<{
   error: Error | null
 }> {
   try {
-    // First, fetch all unassigned bookings
+    // First, fetch all unassigned bookings waiting for a pro to accept.
+    // Status 'requested' = waiting for a pro; 'booked' = already paid+confirmed
+    // (no need to re-display those to the marketplace).
     const { data: bookings, error: bookingsErr } = await supabase
       .from('bookings')
       .select('*')
       .is('provider_id', null)
-      .eq('booking_status', 'booked')
+      .eq('booking_status', 'requested')
       .order('scheduled_date', { ascending: true })
 
     if (bookingsErr) throw bookingsErr

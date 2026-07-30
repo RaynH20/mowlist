@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useElements, useStripe } from '@stripe/react-stripe-js'
-import { ChevronLeft, CreditCard, Lock, Shield, AlertCircle, Loader2, Trash2, Check } from 'lucide-react'
+import { ChevronLeft, CreditCard, Lock, Shield, AlertCircle, Loader2, Trash2, Check, Clock } from 'lucide-react'
 import { useAuth } from '../lib/auth-context'
 import { supabase } from '../lib/supabase'
 import { createAddress, createBooking } from '../lib/api'
@@ -55,8 +55,12 @@ function CheckoutForm() {
       })
   }, [user])
 
-  // Get form data from BookPage (preferred) or URL params (legacy)
+  // Get form data from BookPage (preferred) or URL params (legacy).
+  // If ?booking_id=X is in the URL, the customer is paying for an existing
+  // booking that already has a pro assigned — we fetch the booking instead
+  // of relying on formData.
   const passedFormData = (location.state as any)?.formData
+  const existingBookingId = searchParams.get('booking_id')
   const initialZip = passedFormData?.zipCode || searchParams.get('zip') || ''
   const serviceType = passedFormData?.serviceType || searchParams.get('service') || 'mowing'
   const lawnSize = passedFormData?.lawnSize || searchParams.get('size') || 'medium'
@@ -76,10 +80,46 @@ function CheckoutForm() {
   }
   const basePrice = servicePrices[lawnSize] || 45
   const serviceFee = 2.99
-  const total = basePrice + serviceFee
+  // If paying for an existing booking, use the booking's stored price (the
+  // customer already saw this number when they submitted the request).
+  // Otherwise calculate from the form.
+  const total = isPayingExisting && existingBooking
+    ? Number(existingBooking.estimated_price)
+    : basePrice + serviceFee
 
-  // Generate booking ID
-  const [bookingId] = useState(() => `bk_${crypto.randomUUID()}`)
+  // Generate booking ID. If we're paying for an existing booking (the
+  // customer is coming back after a pro accepted), use that booking's id
+  // instead of creating a new one.
+  const [generatedBookingId] = useState(() => `bk_${crypto.randomUUID()}`)
+  const bookingId = existingBookingId || generatedBookingId
+  const isPayingExisting = !!existingBookingId
+
+  // Fetch the existing booking details so we can show them in the summary
+  const [existingBooking, setExistingBooking] = useState<any | null>(null)
+  useEffect(() => {
+    if (!existingBookingId || !user) return
+    let cancelled = false
+    supabase
+      .from('bookings')
+      .select(`
+        id, booking_status, estimated_price, scheduled_date, scheduled_time_window,
+        yard_size_category, service_frequency, address_id,
+        address:addresses(street_1, city, state, zip_code),
+        pro:provider_profiles(display_name, phone)
+      `)
+      .eq('id', existingBookingId)
+      .eq('customer_id', user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (error) {
+          console.error('Failed to load existing booking:', error)
+          return
+        }
+        setExistingBooking(data)
+      })
+    return () => { cancelled = true }
+  }, [existingBookingId, user])
 
   // Load saved payment methods
   useEffect(() => {
@@ -169,8 +209,12 @@ function CheckoutForm() {
       }
 
       if (paymentIntent?.status === 'succeeded') {
-        // Create the booking in the database
-        if (passedFormData) {
+        // If this is a brand-new booking (legacy flow with passedFormData),
+        // create the address and booking now that payment succeeded.
+        // If this is an existing booking (the pro already accepted), the
+        // booking is already in the database and we just need to navigate
+        // to the confirmation page.
+        if (passedFormData && !isPayingExisting) {
           try {
             const { data: address } = await createAddress({
               user_id: user.id,
@@ -240,6 +284,31 @@ function CheckoutForm() {
           <p className="text-slate-600 text-sm">
             Stripe is not configured. The site admin needs to set VITE_STRIPE_PUBLISHABLE_KEY.
           </p>
+        </div>
+      </div>
+    )
+  }
+
+  // Safety check: if paying for an existing booking that hasn't been
+  // accepted by a pro yet, redirect to the pending page so we don't
+  // accidentally charge MowList's main account.
+  if (isPayingExisting && existingBooking && existingBooking.booking_status === 'requested') {
+    return (
+      <div className="min-h-screen bg-slate-50 p-4 flex items-center justify-center">
+        <div className="bg-white rounded-xl p-6 max-w-md border border-amber-200">
+          <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mb-3">
+            <Clock className="text-amber-600" size={24} />
+          </div>
+          <h2 className="text-lg font-bold text-slate-900 mb-2">A pro hasn't accepted yet</h2>
+          <p className="text-slate-600 text-sm mb-4">
+            We'll let you pay as soon as a local pro accepts your booking. Hang tight!
+          </p>
+          <Link
+            to={`/booking-pending/${existingBookingId}`}
+            className="inline-flex items-center gap-2 bg-[#22C55E] text-white px-5 py-2.5 rounded-lg font-medium hover:bg-[#16A34A] transition-colors text-sm"
+          >
+            View status
+          </Link>
         </div>
       </div>
     )
@@ -453,20 +522,66 @@ function CheckoutForm() {
             <div className="lg:col-span-1">
               <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 sticky top-4">
                 <h2 className="font-semibold text-slate-900 mb-4">Order Summary</h2>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Service ({serviceLabels[lawnSize]})</span>
-                    <span className="text-slate-900">${basePrice.toFixed(2)}</span>
+                {isPayingExisting && existingBooking ? (
+                  <div className="space-y-3 text-sm">
+                    <div>
+                      <span className="text-slate-500">Service</span>
+                      <div className="font-medium text-slate-900 mt-0.5">
+                        {serviceLabels[existingBooking.yard_size_category] || serviceLabels[lawnSize] || 'Lawn Service'}
+                      </div>
+                    </div>
+                    {existingBooking.scheduled_date && (
+                      <div>
+                        <span className="text-slate-500">When</span>
+                        <div className="font-medium text-slate-900 mt-0.5">
+                          {new Date(existingBooking.scheduled_date + 'T00:00:00').toLocaleDateString('en-US', {
+                            weekday: 'short', month: 'short', day: 'numeric',
+                          })}
+                          {existingBooking.scheduled_time_window && ` · ${existingBooking.scheduled_time_window}`}
+                        </div>
+                      </div>
+                    )}
+                    {existingBooking.address && (
+                      <div>
+                        <span className="text-slate-500">Where</span>
+                        <div className="font-medium text-slate-900 mt-0.5">
+                          {existingBooking.address.street_1}
+                          <br />
+                          <span className="text-slate-500 font-normal">
+                            {existingBooking.address.city}, {existingBooking.address.state} {existingBooking.address.zip_code}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    {existingBooking.pro?.display_name && (
+                      <div>
+                        <span className="text-slate-500">Your pro</span>
+                        <div className="font-medium text-[#22C55E] mt-0.5">
+                          {existingBooking.pro.display_name}
+                        </div>
+                      </div>
+                    )}
+                    <div className="border-t border-slate-200 pt-3 flex justify-between font-semibold text-base">
+                      <span className="text-slate-900">Total</span>
+                      <span className="text-[#22C55E]">${total.toFixed(2)}</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Service fee</span>
-                    <span className="text-slate-900">${serviceFee.toFixed(2)}</span>
+                ) : (
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">Service ({serviceLabels[lawnSize]})</span>
+                      <span className="text-slate-900">${basePrice.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">Service fee</span>
+                      <span className="text-slate-900">${serviceFee.toFixed(2)}</span>
+                    </div>
+                    <div className="border-t border-slate-200 pt-2 flex justify-between font-semibold text-base">
+                      <span className="text-slate-900">Total</span>
+                      <span className="text-[#22C55E]">${total.toFixed(2)}</span>
+                    </div>
                   </div>
-                  <div className="border-t border-slate-200 pt-2 flex justify-between font-semibold text-base">
-                    <span className="text-slate-900">Total</span>
-                    <span className="text-[#22C55E]">${total.toFixed(2)}</span>
-                  </div>
-                </div>
+                )}
                 <p className="text-xs text-slate-500 mt-4">
                   Your pro will be paid weekly via direct deposit. MowList takes a small platform fee to keep the lights on.
                 </p>

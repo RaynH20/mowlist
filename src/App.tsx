@@ -12,6 +12,7 @@ import HowItWorksPage from './pages/HowItWorksPage'
 import BookPage from './pages/BookPage'
 import CheckoutPage from './pages/CheckoutPage'
 import BookingConfirmationPage from './pages/BookingConfirmationPage'
+import BookingPendingPage from './pages/BookingPendingPage'
 import ForProsPage from './pages/ForProsPage'
 import PricingPage from './pages/PricingPage'
 import ServiceAreasPage from './pages/ServiceAreasPage'
@@ -127,6 +128,7 @@ function AppRoutes() {
           <Route path="/how-it-works" element={<><Header /><HowItWorksPage /><Footer /></>} />
           <Route path="/book" element={<><Header /><BookPage /><Footer /></>} />
           <Route path="/checkout" element={<><Header /><CheckoutPage /><Footer /></>} />
+          <Route path="/booking-pending/:bookingId" element={<><Header /><BookingPendingPage /><Footer /></>} />
           <Route path="/booking-confirmation" element={<><Header /><BookingConfirmationPage /><Footer /></>} />
           <Route path="/for-pros" element={<><Header /><ForProsPage /><Footer /></>} />
           <Route path="/pricing" element={<><Header /><PricingPage /><Footer /></>} />

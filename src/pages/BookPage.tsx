@@ -441,8 +441,10 @@ export default function BookPage() {
           throw new Error('Failed to create booking request')
         }
 
-        // Create the booking directly for standard bookings
-        const { error: bookingCreateError } = await createBooking({
+        // Create the booking with status 'requested' — we'll wait for a pro
+        // to accept before the customer pays (so the payment can be routed
+        // directly to the pro's Stripe Connect account).
+        const { data: newBooking, error: bookingCreateError } = await createBooking({
           customer_id: user.id,
           address_id: addressId,
           yard_size_category: mapYardSizeToSchema(formData.lawnSize),
@@ -451,42 +453,22 @@ export default function BookPage() {
           scheduled_date: formData.date || null,
           scheduled_time_window: formData.time || null,
           estimated_price: calculatePrice(),
-          booking_status: 'booked',
+          booking_status: 'requested',
           payment_status: 'pending',
         })
 
-        if (bookingCreateError) {
+        if (bookingCreateError || !newBooking) {
           throw new Error('Failed to create booking')
         }
       }
 
-      // Move to confirmation step (only for custom quotes; standard bookings go to /checkout)
+      // Move to confirmation step (only for custom quotes; standard bookings go to /booking-pending)
       if (isCustomQuote) {
         setStep(8)
       } else {
-        // Navigate to /checkout with the booking form data
-        // /checkout will process the Stripe payment and create the booking
-        navigate('/checkout', {
-          state: {
-            formData: {
-              address: formData.address,
-              zipCode: formData.zipCode,
-              city: formData.city,
-              state: formData.state,
-              lawnSize: formData.lawnSize,
-              serviceType: formData.serviceType,
-              frequency: formData.frequency,
-              date: formData.date,
-              time: formData.time,
-              name: formData.name,
-              email: formData.email,
-              phone: formData.phone,
-              specialInstructions: formData.specialInstructions,
-              instructionPhotos: formData.instructionPhotos,
-              instructionTags: formData.instructionTags,
-            },
-          },
-        })
+        // Navigate to the "waiting for pro" page which polls for status and
+        // shows a Pay Now button once a pro accepts
+        navigate(`/booking-pending/${newBooking.id}`)
         return
       }
     } catch (err: any) {

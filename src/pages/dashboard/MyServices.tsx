@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Pause, X, Loader2, AlertCircle, Calendar, Scissors, RefreshCw, FileText, Clock } from 'lucide-react'
+import { Pause, X, Loader2, AlertCircle, Calendar, Scissors, RefreshCw, FileText, Clock, ArrowRight } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { getCustomerBookings, getCustomerQuoteRequests, updateBookingStatus } from '../../lib/api'
 import type { Booking, QuoteRequest } from '../../lib/database.types'
@@ -252,10 +252,36 @@ export default function MyServices() {
                         )}
                       </div>
                     </div>
-                    <span className="bg-green-100 text-[#22C55E] px-3 py-1 rounded-full text-sm font-medium flex-shrink-0">
-                      active
+                    <span className={`px-3 py-1 rounded-full text-sm font-medium flex-shrink-0 ${
+                      booking.booking_status === 'provider_assigned'
+                        ? 'bg-amber-100 text-amber-700'
+                        : booking.booking_status === 'requested'
+                          ? 'bg-slate-100 text-slate-700'
+                          : 'bg-green-100 text-[#22C55E]'
+                    }`}>
+                      {booking.booking_status === 'provider_assigned'
+                        ? 'Ready to Pay'
+                        : booking.booking_status === 'requested'
+                          ? 'Awaiting Pro'
+                          : 'active'}
                     </span>
                   </div>
+                  {(booking.booking_status === 'provider_assigned' || booking.booking_status === 'requested') && (
+                    <div className="mt-4 pt-4 border-t flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <p className="text-sm text-slate-600">
+                        {booking.booking_status === 'requested'
+                          ? 'A pro will accept your request soon. We\'ll let you know.'
+                          : 'A pro has accepted! Pay now to confirm your booking.'}
+                      </p>
+                      <Link
+                        to={`/booking-pending/${booking.id}`}
+                        className="inline-flex items-center gap-2 bg-[#22C55E] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#16A34A] transition-colors text-sm flex-shrink-0"
+                      >
+                        {booking.booking_status === 'requested' ? 'View status' : 'Pay now'}
+                        <ArrowRight size={14} />
+                      </Link>
+                    </div>
+                  )}
                   {isRecurring(booking) && (
                     <div className="mt-4 pt-4 border-t flex items-center gap-4">
                       <button
