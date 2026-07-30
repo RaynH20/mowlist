@@ -255,12 +255,18 @@ export default function BookPage() {
     setFormData(prev => ({ ...prev, instructionPhotos: prev.instructionPhotos.filter((_, i) => i !== index) }))
   }
 
-  const instructionTagOptions = [
-    { id: 'pets', label: 'Pets', icon: '🐶', description: 'Animals on property' },
-    { id: 'locked_gate', label: 'Locked Gate', icon: '🔒', description: 'Gate access required' },
-    { id: 'obstacles', label: 'Obstacles', icon: '⚠️', description: 'Items to avoid' },
-    { id: 'fragile', label: 'Fragile Landscaping', icon: '🌷', description: 'Delicate plants/flowers' },
-    { id: 'call_first', label: 'Call Before Arrival', icon: '📞', description: 'Phone before coming' },
+  // Unified property tags — used for BOTH regular bookings (instructions for the pro)
+  // AND custom quotes (conditions that affect pricing). Single source of truth so the
+  // customer sees the same options regardless of which flow they're in.
+  const propertyTagOptions = [
+    { id: 'pets', label: 'Pets on property', icon: '🐶' },
+    { id: 'locked_gate', label: 'Locked gate', icon: '🔒' },
+    { id: 'hills_slopes', label: 'Steep slopes / hills', icon: '⛰️' },
+    { id: 'overgrown_grass', label: 'Overgrown / tall grass', icon: '🌱' },
+    { id: 'water_features', label: 'Water features', icon: '💧' },
+    { id: 'fragile', label: 'Fragile landscaping', icon: '🌷' },
+    { id: 'obstacles', label: 'Obstacles to avoid', icon: '⚠️' },
+    { id: 'call_first', label: 'Call before arriving', icon: '📞' },
   ]
 
   const nextStep = () => {
@@ -913,7 +919,7 @@ export default function BookPage() {
                     Quick Tags <span className="text-slate-400 font-normal">(optional)</span>
                   </label>
                   <div className="grid grid-cols-2 gap-2">
-                    {instructionTagOptions.map((tag) => (
+                    {propertyTagOptions.map((tag) => (
                       <button
                         key={tag.id}
                         onClick={() => toggleInstructionTag(tag.id)}
@@ -1132,28 +1138,24 @@ export default function BookPage() {
                   />
                 </div>
 
-                {/* Special Conditions */}
+                {/* Property Tags (unified with regular booking) */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-3">Special Conditions (select all that apply)</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-3">
+                    Property Notes (select all that apply)
+                  </label>
                   <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { id: 'hills', label: 'Hills / Slopes' },
-                      { id: 'gates', label: 'Locked Gates' },
-                      { id: 'dogs', label: 'Dogs / Pets' },
-                      { id: 'tall_grass', label: 'Overgrown Grass' },
-                      { id: 'obstacles', label: 'Obstacles' },
-                      { id: 'water_features', label: 'Water Features' },
-                    ].map((condition) => (
+                    {propertyTagOptions.map((tag) => (
                       <button
-                        key={condition.id}
-                        onClick={() => toggleSpecialCondition(condition.id)}
-                        className={`p-3 border-2 rounded-xl text-sm font-medium transition-all text-left ${
-                          formData.specialConditions.includes(condition.id)
+                        key={tag.id}
+                        onClick={() => toggleSpecialCondition(tag.id)}
+                        className={`p-3 border-2 rounded-xl text-sm font-medium transition-all text-left flex items-center gap-2 ${
+                          formData.specialConditions.includes(tag.id)
                             ? 'border-[#22C55E] bg-green-50 text-[#22C55E]'
                             : 'border-slate-200 hover:border-[#22C55E]/50 text-slate-600'
                         }`}
                       >
-                        {condition.label}
+                        <span className="text-lg">{tag.icon}</span>
+                        <span>{tag.label}</span>
                       </button>
                     ))}
                   </div>
@@ -1410,7 +1412,7 @@ export default function BookPage() {
                       {formData.instructionTags.length > 0 && (
                         <div className="flex flex-wrap gap-1 mb-2">
                           {formData.instructionTags.map(tag => {
-                            const tagOption = instructionTagOptions.find(t => t.id === tag)
+                            const tagOption = propertyTagOptions.find(t => t.id === tag)
                             return (
                               <span key={tag} className="inline-flex items-center gap-1 bg-amber-100 text-amber-700 px-2 py-1 rounded-full text-xs font-medium">
                                 {tagOption?.icon} {tagOption?.label}
