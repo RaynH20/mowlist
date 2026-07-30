@@ -105,24 +105,8 @@ export default function TrackService() {
     return () => { cancelled = true }
   }, [user])
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="animate-spin text-[#22C55E]" size={32} />
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-        <AlertCircle className="text-red-500 flex-shrink-0 mt-0.5" size={20} />
-        <p className="text-red-700 text-sm">{error}</p>
-      </div>
-    )
-  }
-
-  // All bookings the user can track (booked / in-progress / completed)
+  // All bookings the user can track (booked / in-progress / completed).
+  // useMemo must be declared BEFORE any early returns to keep hook order stable.
   const trackableBookings = useMemo(
     () => bookings.filter(isActiveForTracking),
     [bookings]
@@ -154,6 +138,25 @@ export default function TrackService() {
     return sortedTrackable[0]
   }, [sortedTrackable, selectedBookingId])
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="animate-spin text-[#22C55E]" size={32} />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+        <AlertCircle className="text-red-500 flex-shrink-0 mt-0.5" size={20} />
+        <p className="text-red-700 text-sm">{error}</p>
+      </div>
+    )
+  }
+
+  // All bookings the user can track (booked / in-progress / completed)
+  // Note: the useMemo calls are above the early returns to keep hook order stable.
   const address = activeBooking
     ? addresses.find((a) => a.id === activeBooking.address_id)
     : null
