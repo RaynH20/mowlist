@@ -78,6 +78,27 @@ export async function setDefaultPaymentMethod(user_id: string, payment_method_id
   if (error) throw new Error(error.message)
 }
 
+export interface CreateSetupIntentParams {
+  user_id: string
+  customer_email: string
+  customer_name?: string
+}
+
+export interface CreateSetupIntentResult {
+  clientSecret: string
+  customerId: string
+}
+
+/**
+ * Create a Stripe SetupIntent so the user can save a card without making a payment.
+ * Used by the "Add a card" flow on the Payment Methods page.
+ */
+export async function createSetupIntent(
+  params: CreateSetupIntentParams
+): Promise<CreateSetupIntentResult> {
+  return callEdgeFunction<CreateSetupIntentResult>('setup-intent', params)
+}
+
 // Brand display name mapping
 export function getCardBrandLabel(brand: string): string {
   const map: Record<string, string> = {

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { CreditCard, Trash2, Loader2, Plus, AlertCircle, Check } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import {
@@ -79,7 +80,15 @@ export default function PaymentMethods() {
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2 mb-4">
           <AlertCircle size={16} className="text-red-500 mt-0.5 flex-shrink-0" />
-          <p className="text-sm text-red-700">{error}</p>
+          <div className="flex-1">
+            <p className="text-sm text-red-700">{error}</p>
+            <button
+              onClick={() => setError(null)}
+              className="text-xs text-red-600 hover:text-red-800 underline mt-1"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -94,14 +103,22 @@ export default function PaymentMethods() {
           </div>
           <h2 className="text-lg font-semibold text-slate-900 mb-2">No saved cards</h2>
           <p className="text-slate-500 text-sm mb-6 max-w-sm mx-auto">
-            Add a card during checkout to save it for next time. Saved cards make booking faster.
+            Add a card now so checkout is one click next time.
           </p>
-          <a
-            href="/book"
-            className="inline-block bg-[#22C55E] text-white px-6 py-2.5 rounded-lg font-semibold hover:bg-[#16A34A] transition-colors"
-          >
-            <Plus size={18} className="inline mr-1" /> Book a service
-          </a>
+          <div className="flex flex-col sm:flex-row gap-2 justify-center">
+            <Link
+              to="/dashboard/payment/add"
+              className="inline-flex items-center justify-center gap-2 bg-[#22C55E] text-white px-6 py-2.5 rounded-lg font-semibold hover:bg-[#16A34A] transition-colors"
+            >
+              <Plus size={18} /> Add a card
+            </Link>
+            <Link
+              to="/book"
+              className="inline-flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-700 px-6 py-2.5 rounded-lg font-medium hover:bg-slate-50 transition-colors"
+            >
+              Book a service
+            </Link>
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
@@ -157,12 +174,12 @@ export default function PaymentMethods() {
           ))}
 
           <div className="pt-4">
-            <a
-              href="/book"
+            <Link
+              to="/dashboard/payment/add"
               className="inline-flex items-center gap-2 text-sm text-[#22C55E] hover:text-[#16A34A] font-medium"
             >
               <Plus size={16} /> Add another card
-            </a>
+            </Link>
           </div>
         </div>
       )}

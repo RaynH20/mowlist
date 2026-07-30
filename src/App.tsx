@@ -38,6 +38,7 @@ import DashboardLayout from './layouts/DashboardLayout'
 import CustomerDashboard from './pages/dashboard/Dashboard'
 import MyServices from './pages/dashboard/MyServices'
 import TrackService from './pages/dashboard/TrackService'
+import AddCardPage from './pages/AddCardPage'
 import PaymentMethods from './pages/dashboard/PaymentMethods'
 import AccountSettings from './pages/dashboard/AccountSettings'
 
@@ -156,6 +157,7 @@ function AppRoutes() {
             <Route path="services" element={<MyServices />} />
             <Route path="track" element={<TrackService />} />
             <Route path="payment" element={<PaymentMethods />} />
+            <Route path="payment/add" element={<AddCardPage />} />
             <Route path="settings" element={<AccountSettings />} />
           </Route>
 
