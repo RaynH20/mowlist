@@ -460,17 +460,16 @@ export default function BookPage() {
         if (bookingCreateError || !newBooking) {
           throw new Error('Failed to create booking')
         }
-      }
 
-      // Move to confirmation step (only for custom quotes; standard bookings go to /booking-pending)
-      if (isCustomQuote) {
-        setStep(8)
-      } else {
         // Navigate to the "waiting for pro" page which polls for status and
         // shows a Pay Now button once a pro accepts
         navigate(`/booking-pending/${newBooking.id}`)
         return
       }
+
+      // Custom quote confirmation (the standard booking branch above already
+      // navigated to the pending page and returned)
+      setStep(8)
     } catch (err: any) {
       setError(err.message || 'An error occurred. Please try again.')
     } finally {
