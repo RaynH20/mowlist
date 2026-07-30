@@ -129,15 +129,20 @@ export default function TrackService() {
     })
   }, [trackableBookings])
 
-  // Default the selected booking to the highest-priority one
-  const activeBooking = useMemo(() => {
-    if (sortedTrackable.length === 0) return null
-    if (selectedBookingId) {
-      const found = sortedTrackable.find((b) => b.id === selectedBookingId)
-      if (found) return found
-    }
-    return sortedTrackable[0]
-  }, [sortedTrackable, selectedBookingId])
+  // The currently-expanded booking, or null = nothing is expanded.
+  // No default — clicking the first card to "close" it actually closes it.
+  const explicitlyExpanded = selectedBookingId
+    ? sortedTrackable.find((b) => b.id === selectedBookingId) || null
+    : null
+
+  // If there's exactly one trackable booking, auto-expand it (nothing to
+  // scroll through anyway). Multi-booking case stays all-collapsed until
+  // the user picks one.
+  const expandedBooking = explicitlyExpanded
+    ?? (sortedTrackable.length === 1 ? sortedTrackable[0] : null)
+
+  // Backwards-compat alias for the empty-state code path below
+  const activeBooking = expandedBooking
 
   if (loading) {
     return (
@@ -399,6 +404,11 @@ export default function TrackService() {
     )
   }
 
+  // Subtitle: when there are multiple bookings, prompt to tap one. When
+  // there's exactly one, describe that one (using expandedBooking as a
+  // hint, but not requiring it to be expanded).
+  const singleBooking = sortedTrackable.length === 1 ? sortedTrackable[0] : null
+
   return (
     <div>
       <div className="mb-5">
@@ -406,11 +416,13 @@ export default function TrackService() {
         <p className="text-sm text-slate-500 mt-1">
           {sortedTrackable.length > 1
             ? `You have ${sortedTrackable.length} services in progress. Tap any to see its timeline.`
-            : activeBooking.booking_status === 'completed'
+            : singleBooking?.booking_status === 'completed'
               ? 'This service is done — thanks for using MowList!'
-              : activeBooking.booking_status === 'booked'
+              : singleBooking?.booking_status === 'booked'
                 ? "We're matching you with a pro. We'll update this page as it moves along."
-                : 'Live status of your service, updated as your pro moves through each step.'}
+                : singleBooking
+                  ? 'Live status of your service, updated as your pro moves through each step.'
+                  : ''}
         </p>
       </div>
 
@@ -426,7 +438,7 @@ export default function TrackService() {
       {/* Expandable booking cards — each one shows the full timeline inline */}
       <div className="space-y-2">
         {sortedTrackable.map((booking) => {
-          const isSelected = booking.id === activeBooking.id
+          const isSelected = expandedBooking?.id === booking.id
           return (
             <div
               key={booking.id}
