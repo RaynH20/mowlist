@@ -496,41 +496,35 @@ export default function BookPage() {
     }
   }
 
-  // Dynamic steps based on flow type
+  // Dynamic steps based on flow type. The custom quote flow has only 4 steps
+  // (Address → Service → Details → Confirm) but the actual state `step` skips
+  // around (1, 2, 5, 8) because the same component also handles the regular
+  // booking flow (1-7). So we map both: a "display number" for the progress
+  // bar, and the "real step" used in the component for rendering.
   const getSteps = () => {
     if (isCustomQuote) {
       return [
-        { number: 1, title: 'Address' },
-        { number: 2, title: 'Service' },
-        { number: 5, title: 'Details' },
-        { number: 8, title: 'Confirm' },
+        { number: 1, title: 'Address', realStep: 1 },
+        { number: 2, title: 'Service', realStep: 2 },
+        { number: 3, title: 'Details', realStep: 5 },
+        { number: 4, title: 'Confirm', realStep: 8 },
       ]
     }
     return [
-      { number: 1, title: 'Address' },
-      { number: 2, title: 'Service' },
-      { number: 3, title: 'Schedule' },
-      { number: 4, title: 'Instructions' },
-      { number: 5, title: 'Account' },
-      { number: 6, title: 'Review' },
-      { number: 7, title: 'Confirm' },
+      { number: 1, title: 'Address', realStep: 1 },
+      { number: 2, title: 'Service', realStep: 2 },
+      { number: 3, title: 'Schedule', realStep: 3 },
+      { number: 4, title: 'Instructions', realStep: 4 },
+      { number: 5, title: 'Account', realStep: 5 },
+      { number: 6, title: 'Review', realStep: 6 },
+      { number: 7, title: 'Confirm', realStep: 7 },
     ]
   }
 
   const steps = getSteps()
 
-  // Get current step number for progress display
-  const getCurrentStepNumber = () => {
-    if (isCustomQuote) {
-      if (step === 1) return 1
-      if (step === 2) return 2
-      if (step === 5) return 3
-      if (step === 8) return 4
-      return step
-    }
-    // For regular booking: 1=Address, 2=Service, 3=Schedule, 4=Instructions, 5=Account, 6=Payment, 7=Confirm
-    return step
-  }
+  // Current display step: find the step whose realStep matches the current state
+  const currentDisplayStep = steps.find((s) => s.realStep === step)?.number || 1
 
   return (
     <div className="pt-20 pb-12 bg-slate-50 min-h-screen">
@@ -539,7 +533,7 @@ export default function BookPage() {
         <div className="mb-6">
           <div className="flex items-center justify-between overflow-x-auto pb-2">
             {steps.map((s, index) => {
-              const currentStepNum = getCurrentStepNumber()
+              const currentStepNum = currentDisplayStep
               return (
                 <div key={s.number} className="flex items-center flex-shrink-0">
                   <div
@@ -564,7 +558,7 @@ export default function BookPage() {
           </div>
           <div className="flex justify-between mt-2 overflow-x-auto px-1">
             {steps.map((s) => {
-              const currentStepNum = getCurrentStepNumber()
+              const currentStepNum = currentDisplayStep
               return (
                 <span
                   key={s.number}
@@ -1553,7 +1547,7 @@ export default function BookPage() {
 
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <Link
-                  to="/dashboard"
+                  to="/dashboard/services"
                   className="inline-block bg-[#22C55E] text-white px-8 py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors shadow-lg shadow-green-200"
                 >
                   View My Quotes
