@@ -1,10 +1,19 @@
-import { Link, Outlet, useLocation } from 'react-router-dom'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Home, Calendar, MapPin, CreditCard, Settings, LogOut, Menu, X, Plus } from 'lucide-react'
 import { useState } from 'react'
+import { useAuth } from '../lib/auth-context'
 
 export default function DashboardLayout() {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { signOut } = useAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+
+  const handleSignOut = async () => {
+    await signOut()
+    setIsMobileMenuOpen(false)
+    navigate('/', { replace: true })
+  }
 
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: Home },
@@ -51,14 +60,13 @@ export default function DashboardLayout() {
         ))}
       </nav>
       <div className="absolute bottom-0 left-0 right-0 p-4 border-t bg-white">
-        <Link
-          to="/login"
-          onClick={() => setIsMobileMenuOpen(false)}
-          className="flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+        <button
+          onClick={handleSignOut}
+          className="w-full flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors text-left"
         >
           <LogOut size={20} />
           Log Out
-        </Link>
+        </button>
       </div>
     </>
   )

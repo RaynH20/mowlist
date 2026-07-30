@@ -1,10 +1,19 @@
-import { Link, Outlet, useLocation } from 'react-router-dom'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Briefcase, Calendar, DollarSign, MapPin, User, LogOut, Home, Menu, X } from 'lucide-react'
 import { useState } from 'react'
+import { useAuth } from '../lib/auth-context'
 
 export default function ProLayout() {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { signOut } = useAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+
+  const handleSignOut = async () => {
+    await signOut()
+    setIsMobileMenuOpen(false)
+    navigate('/', { replace: true })
+  }
 
   const navItems = [
     { path: '/pro', label: 'Available Jobs', icon: Briefcase },
@@ -42,14 +51,13 @@ export default function ProLayout() {
         ))}
       </nav>
       <div className="p-4 border-t border-blue-800">
-        <Link
-          to="/login"
-          onClick={() => setIsMobileMenuOpen(false)}
-          className="flex items-center gap-3 px-4 py-3 text-blue-200 hover:bg-white/5 rounded-lg transition-colors"
+        <button
+          onClick={handleSignOut}
+          className="w-full flex items-center gap-3 px-4 py-3 text-blue-200 hover:bg-white/5 rounded-lg transition-colors text-left"
         >
           <LogOut size={20} />
           Log Out
-        </Link>
+        </button>
       </div>
     </>
   )

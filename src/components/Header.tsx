@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Menu, X, LogOut, User, Scissors } from 'lucide-react'
 import { useState } from 'react'
 import { useAuth } from '../lib/auth-context'
@@ -6,10 +6,12 @@ import { useAuth } from '../lib/auth-context'
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const { user, signOut } = useAuth()
+  const navigate = useNavigate()
 
   const handleSignOut = async () => {
     await signOut()
     setIsMenuOpen(false)
+    navigate('/', { replace: true })
   }
 
   const getDashboardLink = () => {
