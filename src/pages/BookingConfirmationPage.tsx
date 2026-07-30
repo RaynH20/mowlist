@@ -69,8 +69,8 @@ export default function BookingConfirmationPage() {
 <meta charset="utf-8" />
 <title>MowList Receipt ${bookingId}</title>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; color: #1e293b; }
-  .header { border-bottom: 2px solid #22C55E; padding-bottom: 16px; margin-bottom: 24px; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; color: #1e293b; background: #fff; }
+  .header { border-bottom: 2px solid #22C55E; padding-bottom: 16px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; }
   .logo { font-size: 24px; font-weight: 800; }
   .logo .green { color: #22C55E; }
   .logo .blue { color: #1E40AF; }
@@ -81,11 +81,14 @@ export default function BookingConfirmationPage() {
   h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-top: 32px; }
   .booking-id { font-family: monospace; font-weight: 600; color: #22C55E; }
   .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 12px; text-align: center; }
-  @media print { body { margin: 0; } }
+  .actions { text-align: center; margin: 20px 0; }
+  .actions button { background: #22C55E; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; margin: 0 6px; }
+  .actions button.secondary { background: #e2e8f0; color: #1e293b; }
+  @media print { body { margin: 0; } .actions { display: none; } }
 </style>
 </head>
 <body>
-  <div class="header" style="display: flex; justify-content: space-between; align-items: flex-end;">
+  <div class="header">
     <div>
       <div class="logo"><span class="green">Mow</span><span class="blue">List</span></div>
       <div style="color: #64748b; font-size: 13px; margin-top: 4px;">Lawn care, made simple</div>
@@ -107,22 +110,45 @@ export default function BookingConfirmationPage() {
   <div class="row"><span class="label">Service fee</span><span>$${fee}</span></div>
   <div class="row total"><span>Total paid</span><span>$${total}</span></div>
 
+  <div class="actions">
+    <button onclick="window.print()">Print / Save as PDF</button>
+    <button class="secondary" onclick="window.close()">Close</button>
+  </div>
+
   <div class="footer">
     Payment held until service is complete. MowList takes a small platform fee to keep the lights on.<br />
     Questions? hello@mowlist.com
   </div>
-
-  <script>
-    // Auto-open the print dialog so the user can save as PDF or print
-    window.onload = function() { setTimeout(function() { window.print(); }, 250); };
-  </script>
 </body>
 </html>`
 
-    const win = window.open('', '_blank', 'noopener,noreferrer')
-    if (win) {
-      win.document.write(html)
-      win.document.close()
+    // Use a Blob URL — this is more reliable than window.open with document.write
+    // (which some browsers block or fail to render properly)
+    try {
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const win = window.open(url, '_blank', 'noopener,noreferrer')
+      if (win) {
+        // Clean up the blob URL after the window has had a chance to load it
+        setTimeout(() => URL.revokeObjectURL(url), 60000)
+      } else {
+        // Popup was blocked — fall back to downloading the file
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `mowlist-receipt-${bookingId.replace(/[^A-Z0-9]/gi, '')}.html`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        setTimeout(() => URL.revokeObjectURL(url), 60000)
+      }
+    } catch (err) {
+      // Last-resort fallback: try the old approach
+      const win = window.open('', '_blank')
+      if (win) {
+        win.document.open()
+        win.document.write(html)
+        win.document.close()
+      }
     }
   }
 

@@ -429,7 +429,7 @@ export default function BookPage() {
       { number: 3, title: 'Schedule' },
       { number: 4, title: 'Instructions' },
       { number: 5, title: 'Account' },
-      { number: 6, title: 'Payment' },
+      { number: 6, title: 'Review' },
       { number: 7, title: 'Confirm' },
     ]
   }
@@ -1169,77 +1169,76 @@ export default function BookPage() {
             </div>
           )}
 
-          {/* Step 6: Payment (was step 5, now step 6 for regular booking) */}
+          {/* Step 6: Review (was the dummy "Payment" step — payment is collected on /checkout) */}
           {step === 6 && !isCustomQuote && (
             <div>
-              <h2 className="text-xl font-bold text-slate-900 mb-1">Payment Details</h2>
-              <p className="text-sm text-slate-500 mb-4">Charged only after service is complete</p>
+              <h2 className="text-xl font-bold text-slate-900 mb-1">Review &amp; Continue to Payment</h2>
+              <p className="text-sm text-slate-500 mb-4">Looks good? You'll enter payment on the next screen.</p>
 
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Card Number</label>
-                  <div className="relative">
-                    <CreditCard className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
-                    <input
-                      type="text"
-                      placeholder="4242 4242 4242 4242"
-                      className="w-full pl-10 pr-3 py-2.5 text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#22C55E] focus:border-transparent bg-slate-50 focus:bg-white transition-all font-mono"
-                    />
-                  </div>
+              {/* Order summary */}
+              <div className="bg-slate-50 rounded-lg border border-slate-100 divide-y divide-slate-200">
+                <div className="p-3 flex justify-between text-sm">
+                  <span className="text-slate-500">Service</span>
+                  <span className="font-medium text-slate-900">
+                    {formData.lawnSize === 'small' ? 'Small Yard'
+                      : formData.lawnSize === 'medium' ? 'Medium Yard'
+                      : formData.lawnSize === 'large' ? 'Large Yard'
+                      : 'Custom'} — {formData.frequency || 'one-time'}
+                  </span>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Expiry</label>
-                    <input
-                      type="text"
-                      placeholder="MM/YY"
-                      className="w-full p-2.5 text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#22C55E] focus:border-transparent bg-slate-50 focus:bg-white transition-all font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">CVV</label>
-                    <input
-                      type="text"
-                      placeholder="123"
-                      className="w-full p-2.5 text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#22C55E] focus:border-transparent bg-slate-50 focus:bg-white transition-all font-mono"
-                    />
-                  </div>
+                <div className="p-3 flex justify-between text-sm">
+                  <span className="text-slate-500">When</span>
+                  <span className="font-medium text-slate-900">
+                    {formData.date || 'TBD'}{formData.time ? ` at ${formData.time}` : ''}
+                  </span>
                 </div>
-              </div>
-
-              {/* Trust Badge with enhanced elements */}
-              <div className="mt-4 p-4 bg-green-50 rounded-lg border border-green-100">
-                <div className="flex justify-between items-center mb-3">
-                  <div>
-                    <div className="font-semibold text-slate-900 flex items-center gap-2">
-                      Total: {formData.lawnSize === 'custom' ? 'Custom Quote' : `$${calculatePrice()}`}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {formData.lawnSize === 'custom' ? 'Price confirmed after review' : 'Payment held until service complete'}
-                    </p>
-                  </div>
-                  <Shield className="text-[#22C55E]" size={24} />
+                <div className="p-3 flex justify-between text-sm">
+                  <span className="text-slate-500">Address</span>
+                  <span className="font-medium text-slate-900 text-right">
+                    {formData.address || '—'}{formData.zipCode ? `, ${formData.zipCode}` : ''}
+                  </span>
                 </div>
-
-                {/* Trust badges row */}
-                <div className="flex items-center justify-center gap-4 pt-2 border-t border-green-100">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                    <Lock size={12} className="text-[#22C55E]" />
-                    <span>SSL Encrypted</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                    <Shield size={12} className="text-[#22C55E]" />
-                    <span>PCI Compliant</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                    <CreditCard size={12} className="text-[#22C55E]" />
-                    <span>Stripe</span>
-                  </div>
+                <div className="p-3 flex justify-between text-sm">
+                  <span className="text-slate-500">Service fee</span>
+                  <span className="font-medium text-slate-900">$2.99</span>
+                </div>
+                <div className="p-3 flex justify-between items-center">
+                  <span className="font-semibold text-slate-900">Total today</span>
+                  <span className="font-bold text-lg text-[#22C55E]">
+                    {formData.lawnSize === 'custom' ? 'Custom Quote' : `$${calculatePrice()}`}
+                  </span>
                 </div>
               </div>
 
-              <p className="text-xs text-slate-500 mt-3 text-center">
-                Your payment info is encrypted and secure
+              {/* Payment method hint */}
+              <div className="mt-4 p-4 bg-blue-50 border border-blue-100 rounded-lg flex items-start gap-3">
+                <CreditCard className="text-blue-500 flex-shrink-0 mt-0.5" size={18} />
+                <div className="text-sm">
+                  <p className="font-medium text-blue-900">Payment happens next</p>
+                  <p className="text-blue-700 text-xs mt-0.5">
+                    You'll be taken to a secure Stripe checkout. You can use a saved card or enter a new one. Cards can be saved for one-click checkout next time.
+                  </p>
+                </div>
+              </div>
+
+              {/* Trust badges row */}
+              <div className="mt-4 flex items-center justify-center gap-4">
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <Lock size={12} className="text-[#22C55E]" />
+                  <span>SSL Encrypted</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <Shield size={12} className="text-[#22C55E]" />
+                  <span>PCI Compliant</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <CreditCard size={12} className="text-[#22C55E]" />
+                  <span>Stripe</span>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-500 mt-4 text-center">
+                Payment is held until your pro finishes the job.
               </p>
             </div>
           )}
