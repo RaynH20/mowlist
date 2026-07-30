@@ -96,6 +96,7 @@ export interface QuoteRequest {
   customer_id: string | null
   address_id: string
   property_type: 'residential' | 'commercial' | 'hoa' | 'other'
+  property_type_other: string | null
   yard_notes: string | null
   special_conditions: string[]
   preferred_contact_method: 'email' | 'phone' | 'text'

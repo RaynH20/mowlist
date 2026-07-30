@@ -65,6 +65,35 @@ export default function BookPage() {
     }
   }, [user?.id])
 
+  // Load customer profile (name + phone) so we can prefill the custom quote contact info
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!user?.id) return
+      try {
+        const { data } = await supabase
+          .from('customer_profiles')
+          .select('first_name, last_name, phone')
+          .eq('user_id', user.id)
+          .maybeSingle()
+        if (data) {
+          setProfilePrefill({
+            firstName: data.first_name || '',
+            lastName: data.last_name || '',
+            phone: data.phone || '',
+          })
+          setFormData(prev => ({
+            ...prev,
+            name: data.first_name ? `${data.first_name} ${data.last_name || ''}`.trim() : prev.name,
+            phone: data.phone || prev.phone,
+          }))
+        }
+      } catch (err) {
+        // Non-fatal — just no prefill
+      }
+    }
+    loadProfile()
+  }, [user?.id])
+
   // Additional session check - verify Supabase session is active
   const [sessionChecked, setSessionChecked] = useState(false)
 
@@ -107,6 +136,22 @@ export default function BookPage() {
   const [isCustomQuote, setIsCustomQuote] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Customer profile (prefilled for custom quote contact info)
+  const [profilePrefill, setProfilePrefill] = useState<{
+    firstName: string
+    lastName: string
+    phone: string
+  }>({ firstName: '', lastName: '', phone: '' })
+  // The quote ID returned after the custom quote request is submitted
+  const [submittedQuoteId, setSubmittedQuoteId] = useState<string | null>(null)
+  // The summary of what was submitted, for the confirmation page
+  const [submittedQuoteSummary, setSubmittedQuoteSummary] = useState<{
+    propertyType: string
+    address: string
+    zipCode: string
+    contactMethod: string
+    contactValue: string
+  } | null>(null)
   const [formData, setFormData] = useState({
     address: '',
     zipCode: initialZip,
@@ -126,6 +171,7 @@ export default function BookPage() {
     instructionTags: [] as string[],
     // Quote-specific fields
     propertyType: 'residential',
+    propertyTypeOther: '',
     yardNotes: '',
     specialConditions: [] as string[],
     contactPreference: 'email',
@@ -327,10 +373,11 @@ export default function BookPage() {
 
       if (isCustomQuote) {
         // Create quote request
-        const { error: quoteError } = await createQuoteRequest({
+        const { data: quote, error: quoteError } = await createQuoteRequest({
           customer_id: user.id,
           address_id: addressId,
           property_type: formData.propertyType as any,
+          property_type_other: formData.propertyType === 'other' ? formData.propertyTypeOther : null,
           yard_notes: formData.yardNotes,
           special_conditions: formData.specialConditions,
           preferred_contact_method: formData.contactPreference as any,
@@ -340,6 +387,36 @@ export default function BookPage() {
 
         if (quoteError) {
           throw new Error('Failed to submit quote request')
+        }
+
+        // Save the quote ID and a summary so the confirmation page can show them
+        setSubmittedQuoteId(quote?.id || null)
+        setSubmittedQuoteSummary({
+          propertyType:
+            formData.propertyType === 'other' && formData.propertyTypeOther
+              ? formData.propertyTypeOther
+              : formData.propertyType.charAt(0).toUpperCase() + formData.propertyType.slice(1),
+          address: formData.address,
+          zipCode: formData.zipCode,
+          contactMethod: formData.contactPreference,
+          contactValue:
+            formData.contactPreference === 'email' ? formData.email :
+            formData.contactPreference === 'phone' || formData.contactPreference === 'text' ? formData.phone :
+            formData.email,
+        })
+
+        // Also update the customer profile with the name/phone they provided
+        // (only if not already set) — this prefill persists for next time
+        if (profilePrefill.firstName === '' && formData.name) {
+          const [first, ...rest] = formData.name.split(' ')
+          await supabase
+            .from('customer_profiles')
+            .update({
+              first_name: first || null,
+              last_name: rest.join(' ') || null,
+              phone: formData.phone || null,
+            })
+            .eq('user_id', user.id)
         }
       } else {
         // Create booking request
@@ -1027,6 +1104,22 @@ export default function BookPage() {
                   </select>
                 </div>
 
+                {/* "Other" description */}
+                {formData.propertyType === 'other' && (
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                      Tell us more about your property
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.propertyTypeOther}
+                      onChange={(e) => updateForm('propertyTypeOther', e.target.value)}
+                      placeholder="e.g. Multi-family complex, school campus, church grounds..."
+                      className="w-full p-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#22C55E] focus:border-transparent bg-slate-50 focus:bg-white transition-all"
+                    />
+                  </div>
+                )}
+
                 {/* Yard Notes */}
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Yard / Property Notes</label>
@@ -1157,13 +1250,55 @@ export default function BookPage() {
                   </select>
                 </div>
 
-                {/* Contact Info Already Provided */}
-                <div className="p-4 bg-slate-50 rounded-xl">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Mail className="text-[#22C55E]" size={18} />
-                    <span className="font-medium text-slate-700">Contact will be sent to:</span>
+                {/* Ballpark pricing note */}
+                <div className="p-4 bg-amber-50 border border-amber-100 rounded-xl">
+                  <p className="text-sm text-amber-900 font-medium">Typical pricing</p>
+                  <p className="text-xs text-amber-800 mt-1">
+                    Properties over 12,000 sq ft typically run <strong>$80 – $150+ per visit</strong>,
+                    depending on terrain, access, and frequency. We'll confirm exact pricing in your quote.
+                  </p>
+                </div>
+
+                {/* Contact Info — name, email, phone, edit inline */}
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-3">Your Contact Info</label>
+                  <p className="text-xs text-slate-500 mb-3">
+                    We use this to send you the quote. You can edit any of it before submitting.
+                  </p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Name</label>
+                      <input
+                        type="text"
+                        value={formData.name}
+                        onChange={(e) => updateForm('name', e.target.value)}
+                        placeholder="Jane Doe"
+                        className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#22C55E] focus:border-transparent bg-slate-50 focus:bg-white transition-all text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
+                      <input
+                        type="email"
+                        value={formData.email}
+                        onChange={(e) => updateForm('email', e.target.value)}
+                        placeholder="jane@example.com"
+                        className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#22C55E] focus:border-transparent bg-slate-50 focus:bg-white transition-all text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Phone <span className="text-slate-400 font-normal">(only needed if you chose phone or text)</span>
+                      </label>
+                      <input
+                        type="tel"
+                        value={formData.phone}
+                        onChange={(e) => updateForm('phone', e.target.value)}
+                        placeholder="(555) 123-4567"
+                        className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#22C55E] focus:border-transparent bg-slate-50 focus:bg-white transition-all text-sm"
+                      />
+                    </div>
                   </div>
-                  <p className="text-slate-600">Please provide your contact details in the next step</p>
                 </div>
               </div>
             </div>
@@ -1322,46 +1457,119 @@ export default function BookPage() {
                 <Check size={40} className="text-[#1E40AF]" />
               </div>
               <h2 className="text-2xl font-bold text-slate-900 mb-2">Quote Request Submitted!</h2>
-              <p className="text-slate-600 mb-8">Thanks! Your property requires a custom quote. We'll review the details and contact you with pricing before booking is finalized.</p>
+              <p className="text-slate-600 mb-6">Thanks! We'll review your property and send pricing your way.</p>
 
-              <div className="bg-slate-50 rounded-xl p-6 text-left mb-8 border border-slate-100">
-                <h3 className="font-semibold text-slate-900 mb-4">Quote Request Summary</h3>
+              {/* Quote ID — real, from the database */}
+              {submittedQuoteId && (
+                <div className="inline-flex items-center gap-2 bg-gradient-to-r from-[#1E40AF] to-blue-700 text-white px-5 py-2.5 rounded-full mb-6 shadow-md">
+                  <span className="text-white/80 text-xs uppercase tracking-wide">Quote ID</span>
+                  <span className="font-mono font-bold text-lg">#{submittedQuoteId.slice(-8).toUpperCase()}</span>
+                </div>
+              )}
+
+              {/* Summary of what was submitted */}
+              <div className="bg-slate-50 rounded-xl p-6 text-left mb-6 border border-slate-100">
+                <h3 className="font-semibold text-slate-900 mb-4">Your Submission</h3>
                 <div className="space-y-3 text-sm">
-                  <div className="flex justify-between py-2 border-b border-slate-200">
-                    <span className="text-slate-500">Address</span>
-                    <span className="font-medium text-slate-900">{formData.address}, {formData.zipCode}</span>
+                  <div className="flex justify-between py-2 border-b border-slate-200 gap-3">
+                    <span className="text-slate-500 flex-shrink-0">Address</span>
+                    <span className="font-medium text-slate-900 text-right">
+                      {submittedQuoteSummary?.address || formData.address}
+                      {submittedQuoteSummary?.zipCode || formData.zipCode}
+                    </span>
                   </div>
                   <div className="flex justify-between py-2 border-b border-slate-200">
                     <span className="text-slate-500">Property Type</span>
-                    <span className="font-medium text-slate-900 capitalize">{formData.propertyType}</span>
+                    <span className="font-medium text-slate-900">
+                      {submittedQuoteSummary?.propertyType || formData.propertyType}
+                    </span>
                   </div>
+                  {formData.specialConditions.length > 0 && (
+                    <div className="flex justify-between py-2 border-b border-slate-200">
+                      <span className="text-slate-500">Special Conditions</span>
+                      <span className="font-medium text-slate-900 text-right capitalize">
+                        {formData.specialConditions.join(', ')}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between py-2 border-b border-slate-200">
-                    <span className="text-slate-500">Special Conditions</span>
-                    <span className="font-medium text-slate-900 capitalize">{formData.specialConditions.join(', ') || 'None'}</span>
-                  </div>
-                  <div className="flex justify-between py-2 border-b border-slate-200">
-                    <span className="text-slate-500">Preferred Contact</span>
-                    <span className="font-medium text-slate-900 capitalize">{formData.contactPreference}</span>
+                    <span className="text-slate-500">Preferred Timing</span>
+                    <span className="font-medium text-slate-900 capitalize">
+                      {formData.preferredTiming.replace('_', ' ')}
+                    </span>
                   </div>
                   <div className="flex justify-between py-2">
-                    <span className="font-semibold text-slate-900">Status</span>
-                    <span className="font-bold text-[#1E40AF]">Pending Review</span>
+                    <span className="text-slate-500">We'll reach out via</span>
+                    <span className="font-medium text-slate-900 text-right">
+                      {formData.contactPreference.charAt(0).toUpperCase() + formData.contactPreference.slice(1)}
+                      <br />
+                      <span className="text-xs text-slate-500 font-normal">
+                        {formData.contactPreference === 'email' ? formData.email : formData.phone}
+                      </span>
+                    </span>
                   </div>
                 </div>
               </div>
 
-              <div className="bg-blue-50 rounded-xl p-4 mb-8 border border-blue-100">
-                <p className="text-sm text-[#1E40AF]">
-                  <strong>What's Next?</strong> Our team will review your property details and send a custom quote to your {formData.contactPreference} within 24-48 hours.
-                </p>
+              {/* Timeline: what happens next */}
+              <div className="bg-white rounded-xl border border-slate-100 p-6 text-left mb-6">
+                <h3 className="font-semibold text-slate-900 mb-4">What happens next</h3>
+                <div className="relative pl-6">
+                  <div className="absolute left-2 top-2 bottom-2 w-0.5 bg-slate-200"></div>
+                  <div className="space-y-4">
+                    <div className="flex items-start gap-3 relative">
+                      <div className="w-4 h-4 rounded-full bg-[#22C55E] -ml-1 mt-0.5 z-10 ring-4 ring-green-100"></div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">Request submitted</p>
+                        <p className="text-xs text-slate-500">Just now</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 relative">
+                      <div className="w-4 h-4 rounded-full bg-slate-200 -ml-1 mt-0.5 z-10"></div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-500">Under review</p>
+                        <p className="text-xs text-slate-400">Our team reviews your property details</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 relative">
+                      <div className="w-4 h-4 rounded-full bg-slate-200 -ml-1 mt-0.5 z-10"></div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-500">Quote sent</p>
+                        <p className="text-xs text-slate-400">Within 24-48 hours, via {formData.contactPreference}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 relative">
+                      <div className="w-4 h-4 rounded-full bg-slate-200 -ml-1 mt-0.5 z-10"></div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-500">Approve & book</p>
+                        <p className="text-xs text-slate-400">Accept the quote and we schedule your first visit</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <Link
-                to="/dashboard"
-                className="inline-block bg-[#22C55E] text-white px-10 py-4 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors shadow-lg shadow-green-200"
-              >
-                View My Quotes
-              </Link>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <Link
+                  to="/dashboard"
+                  className="inline-block bg-[#22C55E] text-white px-8 py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors shadow-lg shadow-green-200"
+                >
+                  View My Quotes
+                </Link>
+                <Link
+                  to="/book"
+                  className="inline-block bg-white border border-slate-300 text-slate-700 px-8 py-3 rounded-xl font-semibold hover:bg-slate-50 transition-colors"
+                  onClick={() => {
+                    // Reset for a fresh booking
+                    setStep(1)
+                    setIsCustomQuote(false)
+                    setSubmittedQuoteId(null)
+                    setSubmittedQuoteSummary(null)
+                  }}
+                >
+                  Book Another Service
+                </Link>
+              </div>
             </div>
           )}
 

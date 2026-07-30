@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Pause, X, Loader2, AlertCircle, Calendar, Scissors, RefreshCw } from 'lucide-react'
+import { Pause, X, Loader2, AlertCircle, Calendar, Scissors, RefreshCw, FileText, Clock } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
-import { getCustomerBookings, updateBookingStatus } from '../../lib/api'
-import type { Booking } from '../../lib/database.types'
+import { getCustomerBookings, getCustomerQuoteRequests, updateBookingStatus } from '../../lib/api'
+import type { Booking, QuoteRequest } from '../../lib/database.types'
 
 const YARD_SIZE_LABELS: Record<string, string> = {
   small: 'Small Yard',
@@ -31,6 +31,21 @@ const TERMINAL_STATUSES: Record<string, boolean> = {
   cancelled: true,
   refunded: true,
   completed: true,
+}
+
+// Open quote statuses — anything not in here is "done" from the customer's POV
+const OPEN_QUOTE_STATUSES: Record<string, boolean> = {
+  submitted: true,
+  under_review: true,
+  quoted: true,
+}
+
+const QUOTE_STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  submitted: { label: 'Submitted', color: 'bg-amber-100 text-amber-700' },
+  under_review: { label: 'Under Review', color: 'bg-blue-100 text-blue-700' },
+  quoted: { label: 'Quote Ready', color: 'bg-green-100 text-green-700' },
+  approved: { label: 'Approved', color: 'bg-green-100 text-green-700' },
+  declined: { label: 'Declined', color: 'bg-slate-100 text-slate-600' },
 }
 
 function formatDate(iso: string | null): string {
@@ -62,6 +77,7 @@ function isUpcoming(b: Booking): boolean {
 export default function MyServices() {
   const { user } = useAuth()
   const [bookings, setBookings] = useState<Booking[]>([])
+  const [quoteRequests, setQuoteRequests] = useState<QuoteRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [updating, setUpdating] = useState<string | null>(null)
@@ -73,10 +89,14 @@ export default function MyServices() {
       setLoading(true)
       setError(null)
       try {
-        const { data, error: e } = await getCustomerBookings(user.id)
+        const [bookingsRes, quotesRes] = await Promise.all([
+          getCustomerBookings(user.id),
+          getCustomerQuoteRequests(user.id),
+        ])
         if (cancelled) return
-        if (e) setError(e.message)
-        else setBookings(data || [])
+        if (bookingsRes.error) setError(bookingsRes.error.message)
+        else setBookings(bookingsRes.data || [])
+        setQuoteRequests(quotesRes.data || [])
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load services')
       } finally {
@@ -119,12 +139,16 @@ export default function MyServices() {
 
   const activeServices = bookings.filter((b) => isActive(b) && isUpcoming(b))
   const pastServices = bookings.filter((b) => !isActive(b) || !isUpcoming(b))
+  const openQuotes = quoteRequests.filter((q) => OPEN_QUOTE_STATUSES[q.status])
+  const pastQuotes = quoteRequests.filter((q) => !OPEN_QUOTE_STATUSES[q.status])
+
+  const isEmpty = bookings.length === 0 && quoteRequests.length === 0
 
   return (
     <div>
       <h1 className="text-2xl font-bold text-slate-900 mb-6">My Services</h1>
 
-      {bookings.length === 0 ? (
+      {isEmpty ? (
         <div className="bg-white rounded-xl shadow-sm p-8 text-center">
           <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <Scissors className="text-slate-400" size={32} />
@@ -141,6 +165,55 @@ export default function MyServices() {
         </div>
       ) : (
         <>
+          {/* Pending quote requests */}
+          {openQuotes.length > 0 && (
+            <div className="mb-8">
+              <div className="flex items-center gap-2 mb-3">
+                <FileText size={18} className="text-[#1E40AF]" />
+                <h2 className="text-lg font-semibold text-slate-900">Pending Quotes</h2>
+              </div>
+              <div className="space-y-3">
+                {openQuotes.map((quote) => {
+                  const statusInfo = QUOTE_STATUS_LABELS[quote.status] || { label: quote.status, color: 'bg-slate-100 text-slate-600' }
+                  const isQuoted = quote.status === 'quoted' && quote.quoted_price != null
+                  return (
+                    <div key={quote.id} className="bg-white rounded-xl shadow-sm border border-blue-100 p-5">
+                      <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <h3 className="font-semibold text-slate-900">
+                              {quote.property_type === 'other' && quote.property_type_other
+                                ? quote.property_type_other
+                                : quote.property_type.charAt(0).toUpperCase() + quote.property_type.slice(1)}
+                              {' '}— Custom Quote
+                            </h3>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusInfo.color}`}>
+                              {statusInfo.label}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 font-mono">
+                            Quote #{quote.id.slice(-8).toUpperCase()}
+                          </p>
+                        </div>
+                        {isQuoted && (
+                          <div className="text-right">
+                            <p className="text-xs text-slate-500">Quoted price</p>
+                            <p className="text-2xl font-bold text-[#22C55E]">${quote.quoted_price!.toFixed(0)}</p>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <Clock size={12} />
+                        <span>Submitted {formatDate(quote.created_at.split('T')[0])}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Active services (bookings) */}
           {activeServices.length > 0 && (
             <div className="space-y-4 mb-8">
               {activeServices.map((booking) => (
@@ -199,6 +272,7 @@ export default function MyServices() {
             </div>
           )}
 
+          {/* Past bookings */}
           {pastServices.length > 0 && (
             <>
               <h2 className="text-lg font-semibold text-slate-900 mb-3">History</h2>
@@ -219,6 +293,41 @@ export default function MyServices() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </>
+          )}
+
+          {/* Past quote requests (declined/approved) */}
+          {pastQuotes.length > 0 && (
+            <>
+              <h2 className="text-lg font-semibold text-slate-900 mb-3 mt-6">Past Quotes</h2>
+              <div className="space-y-3">
+                {pastQuotes.slice(0, 10).map((quote) => {
+                  const statusInfo = QUOTE_STATUS_LABELS[quote.status] || { label: quote.status, color: 'bg-slate-100 text-slate-600' }
+                  return (
+                    <div key={quote.id} className="bg-slate-50 rounded-lg p-4 flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-slate-900 text-sm">
+                          {quote.property_type === 'other' && quote.property_type_other
+                            ? quote.property_type_other
+                            : quote.property_type.charAt(0).toUpperCase() + quote.property_type.slice(1)}{' '}
+                          — Custom Quote
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5 font-mono">
+                          #{quote.id.slice(-8).toUpperCase()} • {formatDate(quote.created_at.split('T')[0])}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusInfo.color}`}>
+                          {statusInfo.label}
+                        </span>
+                        {quote.quoted_price != null && (
+                          <p className="text-sm font-semibold text-slate-700 mt-1">${quote.quoted_price.toFixed(0)}</p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </>
           )}
