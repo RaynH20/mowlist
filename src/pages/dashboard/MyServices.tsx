@@ -215,8 +215,16 @@ export default function MyServices() {
 
           {/* Active services (bookings) */}
           {activeServices.length > 0 && (
-            <div className="space-y-4 mb-8">
-              {activeServices.map((booking) => (
+            <div className="mb-8">
+              <div className="flex items-center gap-2 mb-3">
+                <Scissors size={18} className="text-[#22C55E]" />
+                <h2 className="text-lg font-semibold text-slate-900">Upcoming Services</h2>
+                <span className="text-xs bg-green-100 text-[#22C55E] px-2 py-0.5 rounded-full font-medium">
+                  {activeServices.length}
+                </span>
+              </div>
+              <div className="space-y-4">
+                {activeServices.map((booking) => (
                 <div key={booking.id} className="bg-white rounded-xl shadow-sm p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -268,7 +276,8 @@ export default function MyServices() {
                     </div>
                   )}
                 </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
 
