@@ -142,7 +142,107 @@ export default function MyServices() {
   const openQuotes = quoteRequests.filter((q) => OPEN_QUOTE_STATUSES[q.status])
   const pastQuotes = quoteRequests.filter((q) => !OPEN_QUOTE_STATUSES[q.status])
 
+  // Bookings that need the customer's attention (still need to pay, or waiting
+  // for a pro to accept). These float to the top so they aren't buried.
+  const actionNeeded = activeServices.filter(
+    (b) => b.booking_status === 'provider_assigned' || b.booking_status === 'requested'
+  )
+  const stableActiveServices = activeServices.filter(
+    (b) => b.booking_status !== 'provider_assigned' && b.booking_status !== 'requested'
+  )
+
   const isEmpty = bookings.length === 0 && quoteRequests.length === 0
+
+  // Render a booking card. Returns the JSX so we can use it both in the
+  // "Action Needed" section (top) and "Upcoming Services" (regular list).
+  const renderBookingCard = (booking: Booking, showRecurringControls: boolean) => {
+    const isActionNeeded =
+      booking.booking_status === 'provider_assigned' || booking.booking_status === 'requested'
+    return (
+      <div
+        key={booking.id}
+        className={`rounded-xl shadow-sm p-6 ${
+          isActionNeeded ? 'bg-amber-50 border-2 border-amber-200' : 'bg-white'
+        }`}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <Scissors size={16} className="text-[#22C55E] flex-shrink-0" />
+              <h3 className="text-lg font-semibold text-slate-900">
+                {YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
+              </h3>
+              {isRecurring(booking) && (
+                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1">
+                  <RefreshCw size={10} />
+                  Recurring
+                </span>
+              )}
+            </div>
+            <p className="text-slate-600 text-sm">
+              {FREQUENCY_LABELS[booking.service_frequency]} • {formatPrice(booking.estimated_price)}
+              {isRecurring(booking) && `/${booking.service_frequency.replace('ly', '').replace('bi', 'bi-')}`}
+            </p>
+            <div className="flex items-center gap-1 text-sm text-slate-700 mt-2">
+              <Calendar size={14} />
+              <span>Next: {formatDate(booking.scheduled_date)}</span>
+              {booking.scheduled_time_window && (
+                <span className="text-slate-400">• {booking.scheduled_time_window}</span>
+              )}
+            </div>
+          </div>
+          <span className={`px-3 py-1 rounded-full text-sm font-medium flex-shrink-0 ${
+            booking.booking_status === 'provider_assigned'
+              ? 'bg-amber-100 text-amber-700'
+              : booking.booking_status === 'requested'
+                ? 'bg-slate-100 text-slate-700'
+                : 'bg-green-100 text-[#22C55E]'
+          }`}>
+            {booking.booking_status === 'provider_assigned'
+              ? 'Ready to Pay'
+              : booking.booking_status === 'requested'
+                ? 'Awaiting Pro'
+                : 'active'}
+          </span>
+        </div>
+        {isActionNeeded && (
+          <div className="mt-4 pt-4 border-t border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <p className="text-sm text-slate-700 font-medium">
+              {booking.booking_status === 'requested'
+                ? 'A pro will accept your request soon. We\'ll let you know.'
+                : 'A pro has accepted! Pay now to confirm your booking.'}
+            </p>
+            <Link
+              to={`/booking-pending/${booking.id}`}
+              className="inline-flex items-center gap-2 bg-[#22C55E] text-white px-5 py-2.5 rounded-lg font-medium hover:bg-[#16A34A] transition-colors text-sm flex-shrink-0"
+            >
+              {booking.booking_status === 'requested' ? 'View status' : 'Pay now'}
+              <ArrowRight size={14} />
+            </Link>
+          </div>
+        )}
+        {showRecurringControls && isRecurring(booking) && !isActionNeeded && (
+          <div className="mt-4 pt-4 border-t flex items-center gap-4">
+            <button
+              disabled={updating === booking.id}
+              className="flex items-center gap-2 text-slate-600 hover:text-[#22C55E] transition-colors disabled:opacity-50 text-sm"
+            >
+              <Pause size={18} />
+              <span>Skip This Week</span>
+            </button>
+            <button
+              onClick={() => handleCancel(booking.id)}
+              disabled={updating === booking.id}
+              className="flex items-center gap-2 text-slate-600 hover:text-red-500 transition-colors disabled:opacity-50 text-sm"
+            >
+              {updating === booking.id ? <Loader2 size={18} className="animate-spin" /> : <X size={18} />}
+              <span>Cancel</span>
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -165,6 +265,24 @@ export default function MyServices() {
         </div>
       ) : (
         <>
+          {/* Action needed (bookings awaiting customer action — top of page) */}
+          {actionNeeded.length > 0 && (
+            <div className="mb-8">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-7 h-7 bg-amber-100 rounded-full flex items-center justify-center">
+                  <AlertCircle className="text-amber-600" size={16} />
+                </div>
+                <h2 className="text-lg font-semibold text-slate-900">Action Needed</h2>
+                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                  {actionNeeded.length}
+                </span>
+              </div>
+              <div className="space-y-4">
+                {actionNeeded.map((booking) => renderBookingCard(booking, false))}
+              </div>
+            </div>
+          )}
+
           {/* Pending quote requests */}
           {openQuotes.length > 0 && (
             <div className="mb-8">
@@ -213,96 +331,18 @@ export default function MyServices() {
             </div>
           )}
 
-          {/* Active services (bookings) */}
-          {activeServices.length > 0 && (
+          {/* Active services (bookings) — action-needed ones moved out above */}
+          {stableActiveServices.length > 0 && (
             <div className="mb-8">
               <div className="flex items-center gap-2 mb-3">
                 <Scissors size={18} className="text-[#22C55E]" />
                 <h2 className="text-lg font-semibold text-slate-900">Upcoming Services</h2>
                 <span className="text-xs bg-green-100 text-[#22C55E] px-2 py-0.5 rounded-full font-medium">
-                  {activeServices.length}
+                  {stableActiveServices.length}
                 </span>
               </div>
               <div className="space-y-4">
-                {activeServices.map((booking) => (
-                <div key={booking.id} className="bg-white rounded-xl shadow-sm p-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <Scissors size={16} className="text-[#22C55E] flex-shrink-0" />
-                        <h3 className="text-lg font-semibold text-slate-900">
-                          {YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
-                        </h3>
-                        {isRecurring(booking) && (
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1">
-                            <RefreshCw size={10} />
-                            Recurring
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-slate-600 text-sm">
-                        {FREQUENCY_LABELS[booking.service_frequency]} • {formatPrice(booking.estimated_price)}
-                        {isRecurring(booking) && `/${booking.service_frequency.replace('ly', '').replace('bi', 'bi-')}`}
-                      </p>
-                      <div className="flex items-center gap-1 text-sm text-slate-700 mt-2">
-                        <Calendar size={14} />
-                        <span>Next: {formatDate(booking.scheduled_date)}</span>
-                        {booking.scheduled_time_window && (
-                          <span className="text-slate-400">• {booking.scheduled_time_window}</span>
-                        )}
-                      </div>
-                    </div>
-                    <span className={`px-3 py-1 rounded-full text-sm font-medium flex-shrink-0 ${
-                      booking.booking_status === 'provider_assigned'
-                        ? 'bg-amber-100 text-amber-700'
-                        : booking.booking_status === 'requested'
-                          ? 'bg-slate-100 text-slate-700'
-                          : 'bg-green-100 text-[#22C55E]'
-                    }`}>
-                      {booking.booking_status === 'provider_assigned'
-                        ? 'Ready to Pay'
-                        : booking.booking_status === 'requested'
-                          ? 'Awaiting Pro'
-                          : 'active'}
-                    </span>
-                  </div>
-                  {(booking.booking_status === 'provider_assigned' || booking.booking_status === 'requested') && (
-                    <div className="mt-4 pt-4 border-t flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                      <p className="text-sm text-slate-600">
-                        {booking.booking_status === 'requested'
-                          ? 'A pro will accept your request soon. We\'ll let you know.'
-                          : 'A pro has accepted! Pay now to confirm your booking.'}
-                      </p>
-                      <Link
-                        to={`/booking-pending/${booking.id}`}
-                        className="inline-flex items-center gap-2 bg-[#22C55E] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#16A34A] transition-colors text-sm flex-shrink-0"
-                      >
-                        {booking.booking_status === 'requested' ? 'View status' : 'Pay now'}
-                        <ArrowRight size={14} />
-                      </Link>
-                    </div>
-                  )}
-                  {isRecurring(booking) && (
-                    <div className="mt-4 pt-4 border-t flex items-center gap-4">
-                      <button
-                        disabled={updating === booking.id}
-                        className="flex items-center gap-2 text-slate-600 hover:text-[#22C55E] transition-colors disabled:opacity-50 text-sm"
-                      >
-                        <Pause size={18} />
-                        <span>Skip This Week</span>
-                      </button>
-                      <button
-                        onClick={() => handleCancel(booking.id)}
-                        disabled={updating === booking.id}
-                        className="flex items-center gap-2 text-slate-600 hover:text-red-500 transition-colors disabled:opacity-50 text-sm"
-                      >
-                        {updating === booking.id ? <Loader2 size={18} className="animate-spin" /> : <X size={18} />}
-                        <span>Cancel</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-                ))}
+                {stableActiveServices.map((booking) => renderBookingCard(booking, true))}
               </div>
             </div>
           )}

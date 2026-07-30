@@ -6,7 +6,7 @@ import { useAuth } from '../lib/auth-context'
 export default function ProLayout() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { signOut } = useAuth()
+  const { signOut, user } = useAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   const handleSignOut = async () => {
@@ -16,7 +16,8 @@ export default function ProLayout() {
   }
 
   const navItems = [
-    { path: '/pro', label: 'Available Jobs', icon: Briefcase },
+    { path: '/pro', label: 'Dashboard', icon: Home },
+    { path: '/pro/available', label: 'Available Jobs', icon: Briefcase },
     { path: '/pro/schedule', label: 'My Jobs', icon: Calendar },
     { path: '/pro/earnings', label: 'Earnings', icon: DollarSign },
     { path: '/pro/profile', label: 'Profile', icon: User },
@@ -32,8 +33,11 @@ export default function ProLayout() {
           <span className="text-[#22C55E]">MowList</span>
           <span className="text-white"> Pro</span>
         </Link>
+        {user?.email && (
+          <p className="text-xs text-blue-200 mt-1 truncate">{user.email}</p>
+        )}
       </div>
-      <nav className="px-4 py-4 flex-1">
+      <nav className="px-4 py-4 flex-1 overflow-y-auto">
         {navItems.map((item) => (
           <Link
             key={item.path}

@@ -166,6 +166,7 @@ function AppRoutes() {
           {/* Pro Dashboard */}
           <Route path="/pro" element={<ProtectedRoute allowedRoles={['provider']}><ProLayout /></ProtectedRoute>}>
             <Route index element={<ProJobs />} />
+            <Route path="available" element={<ProJobs />} />
             <Route path="schedule" element={<ProSchedule />} />
             <Route path="earnings" element={<ProEarnings />} />
             <Route path="area" element={<ProArea />} />
