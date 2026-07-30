@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Check, Calendar, MapPin, CreditCard, Download, Mail, Clock, Home, ArrowRight } from 'lucide-react'
+import { Check, Calendar, MapPin, CreditCard, Download, Clock, Home, ArrowRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 interface BookingConfirmationState {
@@ -265,21 +265,17 @@ export default function BookingConfirmationPage() {
         </div>
 
         {/* Actions */}
-        <div className="flex flex-col sm:flex-row gap-4">
+        <div>
           <button
             onClick={handleDownloadReceipt}
-            className="flex-1 flex items-center justify-center gap-2 bg-[#22C55E] text-white px-6 py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors"
+            className="w-full flex items-center justify-center gap-2 bg-[#22C55E] text-white px-6 py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors"
           >
             <Download size={20} />
             {stripeReceiptUrl ? 'View Receipt' : 'Download Receipt'}
           </button>
-          <button
-            onClick={() => alert('Email receipts are coming with our notification system. For now, use "Download Receipt" to get a copy.')}
-            className="flex-1 flex items-center justify-center gap-2 bg-white border border-slate-300 text-slate-700 px-6 py-3 rounded-xl font-semibold hover:bg-slate-50 transition-colors"
-          >
-            <Mail size={20} />
-            Resend Email
-          </button>
+          <p className="text-xs text-slate-400 text-center mt-3">
+            Email receipts will be sent automatically when our notification system is set up.
+          </p>
         </div>
 
         {/* Track Service CTA */}

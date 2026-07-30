@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { User, Mail, Phone, Home, Save, Loader2, AlertCircle, CheckCircle } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { User, Mail, Phone, Home, Save, Loader2, AlertCircle, CheckCircle, LogOut } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { supabase } from '../../lib/supabase'
 import type { Address } from '../../lib/database.types'
@@ -16,7 +17,14 @@ interface FormData {
 }
 
 export default function AccountSettings() {
-  const { user } = useAuth()
+  const { user, signOut } = useAuth()
+  const navigate = useNavigate()
+
+  const handleSignOut = async () => {
+    if (!confirm('Sign out of MowList?')) return
+    await signOut()
+    navigate('/', { replace: true })
+  }
   const [formData, setFormData] = useState<FormData>({
     firstName: '',
     lastName: '',
@@ -306,6 +314,21 @@ export default function AccountSettings() {
           >
             {saving ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
             {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+
+        {/* Sign Out */}
+        <div className="mt-8 bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-1">Sign out</h2>
+          <p className="text-sm text-slate-500 mb-4">
+            Sign out of your MowList account on this device.
+          </p>
+          <button
+            onClick={handleSignOut}
+            className="bg-white border border-slate-300 text-slate-700 px-5 py-2.5 rounded-lg font-medium hover:bg-slate-50 transition-colors inline-flex items-center gap-2"
+          >
+            <LogOut size={18} />
+            Sign out
           </button>
         </div>
       </div>
