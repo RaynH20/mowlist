@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   Clock, MapPin, CheckCircle, Car, Calendar, Scissors, ArrowRight,
   Loader2, AlertCircle, Phone, MessageCircle, Camera, Package,
+  ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { getCustomerBookings, getUserAddresses } from '../../lib/api'
@@ -186,262 +187,266 @@ export default function TrackService() {
     )
   }
 
-  // Build the timeline based on current status
-  const timelineSteps: Array<{ key: string; label: string; description: string; status: 'done' | 'current' | 'pending' }> = [
-    { key: 'booked', label: 'Booked', description: 'Service scheduled', status: 'done' },
-    { key: 'provider_assigned', label: 'Pro Assigned', description: 'Your pro accepted the job', status: 'pending' },
-    { key: 'on_the_way', label: 'On the Way', description: 'Heading to your location', status: 'pending' },
-    { key: 'arrived', label: 'Arrived', description: 'Pro is at your property', status: 'pending' },
-    { key: 'in_progress', label: 'In Progress', description: 'Service is being performed', status: 'pending' },
-    { key: 'completed', label: 'Completed', description: 'Service finished', status: 'pending' },
-  ]
+  // Build the timeline for a given booking (returns steps with done/current/pending status)
+  const buildTimelineSteps = (status: string) => {
+    const order = ['booked', 'provider_assigned', 'on_the_way', 'arrived', 'in_progress', 'completed']
+    const labels: Record<string, { label: string; description: string }> = {
+      booked: { label: 'Booked', description: 'Service scheduled' },
+      provider_assigned: { label: 'Pro Assigned', description: 'Your pro accepted the job' },
+      on_the_way: { label: 'On the Way', description: 'Heading to your location' },
+      arrived: { label: 'Arrived', description: 'Pro is at your property' },
+      in_progress: { label: 'In Progress', description: 'Service is being performed' },
+      completed: { label: 'Completed', description: 'Service finished' },
+    }
+    const currentIdx = order.indexOf(status)
+    return order.map((key, i) => {
+      let stepStatus: 'done' | 'current' | 'pending' = 'pending'
+      if (i < currentIdx) stepStatus = 'done'
+      else if (i === currentIdx) stepStatus = 'current'
+      return { key, label: labels[key].label, description: labels[key].description, status: stepStatus }
+    })
+  }
 
-  // Mark current and past steps
-  const order = ['booked', 'provider_assigned', 'on_the_way', 'arrived', 'in_progress', 'completed']
-  const currentIdx = order.indexOf(activeBooking.booking_status)
-  timelineSteps.forEach((step, i) => {
-    if (i < currentIdx) step.status = 'done'
-    else if (i === currentIdx) step.status = 'current'
-  })
+  // Render the timeline block for a single booking (used inside expanded cards)
+  const renderTimeline = (booking: Booking) => {
+    const steps = buildTimelineSteps(booking.booking_status)
+    return (
+      <div className="relative pl-2">
+        <div className="absolute left-[15px] top-2 bottom-2 w-0.5 bg-slate-200"></div>
+        <div className="space-y-4">
+          {steps.map((step, index) => (
+            <div key={step.key} className="flex items-start gap-3 relative">
+              <div
+                className={`w-7 h-7 rounded-full flex items-center justify-center z-10 flex-shrink-0 ${
+                  step.status === 'done'
+                    ? 'bg-[#22C55E] text-white'
+                    : step.status === 'current'
+                      ? 'bg-[#22C55E] text-white ring-4 ring-green-100'
+                      : 'bg-slate-200 text-slate-400'
+                }`}
+              >
+                {step.status === 'done' ? <CheckCircle size={14} /> : index + 1}
+              </div>
+              <div className="flex-1 pt-0.5">
+                <span className={`text-sm font-medium block ${step.status !== 'pending' ? 'text-slate-900' : 'text-slate-400'}`}>
+                  {step.label}
+                  {step.status === 'current' && (
+                    <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                      Current
+                    </span>
+                  )}
+                </span>
+                <p className={`text-xs ${step.status !== 'pending' ? 'text-slate-600' : 'text-slate-400'}`}>
+                  {step.description}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  // Render the collapsed header for a booking card
+  const renderCardHeader = (booking: Booking, isSelected: boolean) => {
+    const isBooked = booking.booking_status === 'booked'
+    const isCompleted = booking.booking_status === 'completed'
+    return (
+      <div className="flex items-center gap-3">
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+          isSelected ? 'bg-[#22C55E]' : 'bg-slate-100'
+        }`}>
+          <Scissors className={isSelected ? 'text-white' : 'text-slate-500'} size={16} />
+        </div>
+        <div className="flex-1 min-w-0 text-left">
+          <p className="font-medium text-slate-900 text-sm truncate">
+            {YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
+          </p>
+          <p className="text-xs text-slate-500">
+            {booking.scheduled_date
+              ? formatDate(booking.scheduled_date)
+              : 'Date TBD'}
+          </p>
+        </div>
+        <span
+          className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
+            isCompleted
+              ? 'bg-slate-100 text-slate-700'
+              : isBooked
+                ? 'bg-amber-100 text-amber-700'
+                : 'bg-blue-100 text-blue-700'
+          }`}
+        >
+          {STATUS_LABELS[booking.booking_status] || booking.booking_status}
+        </span>
+        {isSelected ? (
+          <ChevronUp size={18} className="text-slate-400 flex-shrink-0" />
+        ) : (
+          <ChevronDown size={18} className="text-slate-400 flex-shrink-0" />
+        )}
+      </div>
+    )
+  }
+
+  // Render the expanded body for a booking card
+  const renderCardBody = (booking: Booking) => {
+    const isBooked = booking.booking_status === 'booked'
+    const isCompleted = booking.booking_status === 'completed'
+    const bookingAddress = addresses.find((a) => a.id === booking.address_id)
+    return (
+      <div className="mt-4 pt-4 border-t border-slate-200 space-y-4">
+        {/* Service details */}
+        <div className="grid gap-2 text-sm">
+          <div className="flex items-center gap-2 text-slate-600">
+            <MapPin className="text-[#22C55E] flex-shrink-0" size={14} />
+            <span className="truncate">
+              {bookingAddress
+                ? `${bookingAddress.street_1}${bookingAddress.street_2 ? `, ${bookingAddress.street_2}` : ''}, ${bookingAddress.city}, ${bookingAddress.state} ${bookingAddress.zip_code}`
+                : 'Service address'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-slate-600">
+            <Clock className="text-[#22C55E] flex-shrink-0" size={14} />
+            <span>
+              {formatDate(booking.scheduled_date)}
+              {booking.scheduled_time_window && ` at ${booking.scheduled_time_window}`}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-slate-600">
+            <Scissors className="text-[#22C55E] flex-shrink-0" size={14} />
+            <span>${booking.estimated_price}</span>
+          </div>
+        </div>
+
+        {/* Status banner */}
+        <div className={`rounded-lg p-3 flex items-center gap-3 ${
+          isBooked ? 'bg-amber-50' : isCompleted ? 'bg-slate-50' : 'bg-blue-50'
+        }`}>
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+            isBooked ? 'bg-amber-500' : isCompleted ? 'bg-slate-500' : 'bg-blue-500'
+          }`}>
+            {isCompleted ? (
+              <CheckCircle className="text-white" size={16} />
+            ) : isBooked ? (
+              <Clock className="text-white" size={16} />
+            ) : (
+              <Car className="text-white" size={16} />
+            )}
+          </div>
+          <div>
+            <p className={`text-xs font-medium ${
+              isBooked ? 'text-amber-600' : isCompleted ? 'text-slate-600' : 'text-blue-600'
+            }`}>
+              {isBooked
+                ? 'Waiting for a pro to accept'
+                : isCompleted
+                  ? 'Service complete'
+                  : 'Live status'}
+            </p>
+            <p className={`text-sm font-semibold ${
+              isBooked ? 'text-amber-700' : isCompleted ? 'text-slate-700' : 'text-blue-700'
+            }`}>
+              {STATUS_LABELS[booking.booking_status] || 'Scheduled'}
+            </p>
+          </div>
+        </div>
+
+        {/* Timeline */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <Clock size={14} className="text-[#22C55E]" />
+            <h4 className="text-sm font-semibold text-slate-900">Service Progress</h4>
+          </div>
+          {renderTimeline(booking)}
+        </div>
+
+        {/* Action buttons */}
+        <div className="grid grid-cols-2 gap-2 pt-2">
+          <button
+            className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex items-center gap-2 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            disabled={isBooked || isCompleted}
+          >
+            <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+              isBooked ? 'bg-slate-200' : 'bg-blue-100'
+            }`}>
+              <MessageCircle className={isBooked ? 'text-slate-400' : 'text-blue-500'} size={14} />
+            </div>
+            <div>
+              <h3 className="font-medium text-slate-900 text-xs">Message Pro</h3>
+              <p className="text-slate-500 text-[10px]">
+                {isBooked ? 'Available once matched' : 'Send a quick message'}
+              </p>
+            </div>
+          </button>
+          <button
+            className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex items-center gap-2 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            disabled={!isCompleted}
+          >
+            <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+              isCompleted ? 'bg-green-100' : 'bg-slate-200'
+            }`}>
+              <Camera className={isCompleted ? 'text-green-500' : 'text-slate-400'} size={14} />
+            </div>
+            <div>
+              <h3 className="font-medium text-slate-900 text-xs">Service Photos</h3>
+              <p className="text-slate-500 text-[10px]">
+                {isCompleted ? 'View before/after' : 'After the visit'}
+              </p>
+            </div>
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-slate-900">Track Service</h1>
         <p className="text-sm text-slate-500 mt-1">
-          {activeBooking.booking_status === 'completed'
-            ? 'This service is done — thanks for using MowList!'
-            : activeBooking.booking_status === 'booked'
-              ? "We're matching you with a pro. We'll update this page as it moves along."
-              : 'Live status of your service, updated as your pro moves through each step.'}
+          {sortedTrackable.length > 1
+            ? `You have ${sortedTrackable.length} services in progress. Tap any to see its timeline.`
+            : activeBooking.booking_status === 'completed'
+              ? 'This service is done — thanks for using MowList!'
+              : activeBooking.booking_status === 'booked'
+                ? "We're matching you with a pro. We'll update this page as it moves along."
+                : 'Live status of your service, updated as your pro moves through each step.'}
         </p>
       </div>
 
-      {/* Booking picker — only show when there are multiple trackable bookings */}
-      {sortedTrackable.length > 1 && (
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-3">
-            <Scissors size={18} className="text-[#22C55E]" />
-            <h2 className="text-lg font-semibold text-slate-900">Your Active Bookings</h2>
-            <span className="text-xs bg-green-100 text-[#22C55E] px-2 py-0.5 rounded-full font-medium">
-              {sortedTrackable.length}
-            </span>
-          </div>
-          <div className="space-y-2">
-            {sortedTrackable.map((booking) => {
-              const isSelected = booking.id === activeBooking.id
-              return (
-                <button
-                  key={booking.id}
-                  onClick={() => setSelectedBookingId(booking.id)}
-                  className={`w-full text-left p-3 rounded-xl border-2 transition-all ${
-                    isSelected
-                      ? 'border-[#22C55E] bg-green-50'
-                      : 'border-slate-200 bg-white hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      isSelected ? 'bg-[#22C55E]' : 'bg-slate-100'
-                    }`}>
-                      <Scissors className={isSelected ? 'text-white' : 'text-slate-500'} size={16} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-slate-900 text-sm truncate">
-                        {YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {booking.scheduled_date
-                          ? formatDate(booking.scheduled_date)
-                          : 'Date TBD'}
-                      </p>
-                    </div>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        booking.booking_status === 'completed'
-                          ? 'bg-slate-100 text-slate-700'
-                          : booking.booking_status === 'booked'
-                            ? 'bg-amber-100 text-amber-700'
-                            : 'bg-blue-100 text-blue-700'
-                      }`}
-                    >
-                      {STATUS_LABELS[booking.booking_status] || booking.booking_status}
-                    </span>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900">Your Service</h3>
-            <p className="text-slate-600 text-sm">
-              {YARD_SIZE_LABELS[activeBooking.yard_size_category] || 'Lawn Service'}
-            </p>
-          </div>
-          <span className={`px-4 py-2 rounded-full font-medium flex items-center gap-2 text-sm ${
-            activeBooking.booking_status === 'completed'
-              ? 'bg-slate-100 text-slate-700'
-              : activeBooking.booking_status === 'booked'
-                ? 'bg-amber-100 text-amber-700'
-                : 'bg-blue-100 text-blue-700'
-          }`}>
-            {STATUS_ICONS[activeBooking.booking_status] || <Package size={16} />}
-            {STATUS_LABELS[activeBooking.booking_status] || activeBooking.booking_status}
-          </span>
-        </div>
-
-        <div className="bg-slate-50 rounded-lg p-4 mb-4">
-          <div className="grid gap-3">
-            <div className="flex items-center gap-3">
-              <MapPin className="text-[#22C55E]" size={18} />
-              <span className="text-slate-700 text-sm">
-                {address
-                  ? `${address.street_1}${address.street_2 ? `, ${address.street_2}` : ''}, ${address.city}, ${address.state} ${address.zip_code}`
-                  : 'Service address'}
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <Clock className="text-[#22C55E]" size={18} />
-              <span className="text-slate-700 text-sm">
-                {formatDate(activeBooking.scheduled_date)}
-                {activeBooking.scheduled_time_window && ` at ${activeBooking.scheduled_time_window}`}
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <Scissors className="text-[#22C55E]" size={18} />
-              <span className="text-slate-700 text-sm">${activeBooking.estimated_price}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className={`rounded-lg p-4 flex items-center gap-3 ${
-          activeBooking.booking_status === 'booked'
-            ? 'bg-amber-50'
-            : activeBooking.booking_status === 'completed'
-              ? 'bg-slate-50'
-              : 'bg-blue-50'
-        }`}>
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-            activeBooking.booking_status === 'booked'
-              ? 'bg-amber-500'
-              : activeBooking.booking_status === 'completed'
-                ? 'bg-slate-500'
-                : 'bg-blue-500'
-          }`}>
-            {activeBooking.booking_status === 'completed' ? (
-              <CheckCircle className="text-white" size={20} />
-            ) : activeBooking.booking_status === 'booked' ? (
-              <Clock className="text-white" size={20} />
-            ) : (
-              <Car className="text-white" size={20} />
-            )}
-          </div>
-          <div className="flex-1">
-            <p className={`text-sm font-medium ${
-              activeBooking.booking_status === 'booked'
-                ? 'text-amber-600'
-                : activeBooking.booking_status === 'completed'
-                  ? 'text-slate-600'
-                  : 'text-blue-600'
-            }`}>
-              {activeBooking.booking_status === 'booked'
-                ? 'Waiting for a pro to accept'
-                : activeBooking.booking_status === 'completed'
-                  ? 'Service complete'
-                  : 'Live status'}
-            </p>
-            <p className={`text-base font-semibold ${
-              activeBooking.booking_status === 'booked'
-                ? 'text-amber-700'
-                : activeBooking.booking_status === 'completed'
-                  ? 'text-slate-700'
-                  : 'text-blue-700'
-            }`}>
-              {STATUS_LABELS[activeBooking.booking_status] || 'Scheduled'}
-            </p>
-          </div>
-        </div>
+      {/* Section header */}
+      <div className="flex items-center gap-2 mb-3">
+        <Scissors size={18} className="text-[#22C55E]" />
+        <h2 className="text-lg font-semibold text-slate-900">Your Services</h2>
+        <span className="text-xs bg-green-100 text-[#22C55E] px-2 py-0.5 rounded-full font-medium">
+          {sortedTrackable.length}
+        </span>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Clock size={18} className="text-[#22C55E]" />
-          <h3 className="text-lg font-semibold text-slate-900">Service Progress</h3>
-        </div>
-        <div className="relative">
-          <div className="absolute left-4 top-2 bottom-2 w-0.5 bg-slate-200"></div>
-          <div className="space-y-6">
-            {timelineSteps.map((step, index) => (
-              <div key={step.key} className="flex items-start gap-4 relative">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center z-10 flex-shrink-0 ${
-                    step.status === 'done'
-                      ? 'bg-[#22C55E] text-white'
-                      : step.status === 'current'
-                        ? 'bg-[#22C55E] text-white ring-4 ring-green-100'
-                        : 'bg-slate-200 text-slate-400'
-                  }`}
-                >
-                  {step.status === 'done' ? <CheckCircle size={16} /> : index + 1}
-                </div>
-                <div className="flex-1 pt-1">
-                  <span className={`font-medium block ${step.status !== 'pending' ? 'text-slate-900' : 'text-slate-400'}`}>
-                    {step.label}
-                    {step.status === 'current' && (
-                      <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
-                        Current
-                      </span>
-                    )}
-                  </span>
-                  <p className={`text-sm ${step.status !== 'pending' ? 'text-slate-600' : 'text-slate-400'}`}>
-                    {step.description}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Pro actions (disabled until a pro is assigned) */}
-      <div className="grid grid-cols-2 gap-4">
-        <button
-          className="bg-white rounded-lg p-4 shadow-sm flex items-center gap-3 hover:shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          disabled={activeBooking.booking_status === 'booked' || activeBooking.booking_status === 'completed'}
-        >
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-            activeBooking.booking_status === 'booked' ? 'bg-slate-200' : 'bg-blue-100'
-          }`}>
-            <MessageCircle className={activeBooking.booking_status === 'booked' ? 'text-slate-400' : 'text-blue-500'} size={18} />
-          </div>
-          <div className="text-left">
-            <h3 className="font-medium text-slate-900 text-sm">Message Pro</h3>
-            <p className="text-slate-500 text-xs">
-              {activeBooking.booking_status === 'booked' ? 'Available once matched' : 'Send a quick message'}
-            </p>
-          </div>
-        </button>
-        <button
-          className="bg-white rounded-lg p-4 shadow-sm flex items-center gap-3 hover:shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          disabled={activeBooking.booking_status !== 'completed'}
-        >
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-            activeBooking.booking_status === 'completed' ? 'bg-green-100' : 'bg-slate-200'
-          }`}>
-            <Camera className={activeBooking.booking_status === 'completed' ? 'text-green-500' : 'text-slate-400'} size={18} />
-          </div>
-          <div className="text-left">
-            <h3 className="font-medium text-slate-900 text-sm">Service Photos</h3>
-            <p className="text-slate-500 text-xs">
-              {activeBooking.booking_status === 'completed' ? 'View before/after' : 'After the visit'}
-            </p>
-          </div>
-        </button>
+      {/* Expandable booking cards — each one shows the full timeline inline */}
+      <div className="space-y-2">
+        {sortedTrackable.map((booking) => {
+          const isSelected = booking.id === activeBooking.id
+          return (
+            <div
+              key={booking.id}
+              className={`rounded-xl border-2 transition-all ${
+                isSelected
+                  ? 'border-[#22C55E] bg-green-50/30 shadow-sm'
+                  : 'border-slate-200 bg-white hover:border-slate-300'
+              }`}
+            >
+              <button
+                onClick={() => setSelectedBookingId(isSelected ? null : booking.id)}
+                className="w-full p-3 flex items-center text-left"
+                aria-expanded={isSelected}
+              >
+                {renderCardHeader(booking, isSelected)}
+              </button>
+              {isSelected && renderCardBody(booking)}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
