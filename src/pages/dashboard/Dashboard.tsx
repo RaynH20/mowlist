@@ -78,6 +78,9 @@ export default function Dashboard() {
   const [quoteRequests, setQuoteRequests] = useState<QuoteRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // First name for personalized greeting. All hooks must be declared before
+  // any early returns so React's hook order is stable.
+  const [firstName, setFirstName] = useState<string | null>(null)
 
   useEffect(() => {
     if (!user) return
@@ -108,6 +111,23 @@ export default function Dashboard() {
     }
 
     fetch()
+    return () => { cancelled = true }
+  }, [user])
+
+  // Best-effort first name for the greeting
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    import('../../lib/supabase').then(({ supabase }) => {
+      supabase
+        .from('customer_profiles')
+        .select('first_name')
+        .eq('user_id', user.id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (!cancelled && data?.first_name) setFirstName(data.first_name)
+        })
+    })
     return () => { cancelled = true }
   }, [user])
 
@@ -151,23 +171,6 @@ export default function Dashboard() {
     return a.scheduled_date.localeCompare(b.scheduled_date)
   })[0]
   const isFirstTime = !hasBookings && openQuotes.length === 0
-
-  // Try to grab a friendly first name for the greeting
-  const [firstName, setFirstName] = useState<string | null>(null)
-  useEffect(() => {
-    if (!user) return
-    // Best effort — try to read the customer profile's first_name
-    import('../../lib/supabase').then(({ supabase }) => {
-      supabase
-        .from('customer_profiles')
-        .select('first_name')
-        .eq('user_id', user.id)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (data?.first_name) setFirstName(data.first_name)
-        })
-    })
-  }, [user])
 
   return (
     <div>
