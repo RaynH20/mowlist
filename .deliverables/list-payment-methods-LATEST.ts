@@ -1,6 +1,5 @@
 // Supabase Edge Function: list-payment-methods
-// LIST SAVED CARDS - returns the customer's saved payment methods (cards) from Stripe
-// This function ONLY lists payment methods. It does NOT create payment intents or process payments.
+// Returns the customer's saved payment methods (cards) from Stripe
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
