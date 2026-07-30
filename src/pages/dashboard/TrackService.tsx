@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Clock, MapPin, CheckCircle, Car, Calendar, Scissors, ArrowRight,
@@ -77,6 +77,8 @@ export default function TrackService() {
   const [addresses, setAddresses] = useState<Address[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Which booking the user is currently viewing the timeline for
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!user) return
@@ -120,7 +122,38 @@ export default function TrackService() {
     )
   }
 
-  const activeBooking = bookings.find(isActiveForTracking)
+  // All bookings the user can track (booked / in-progress / completed)
+  const trackableBookings = useMemo(
+    () => bookings.filter(isActiveForTracking),
+    [bookings]
+  )
+  // Sort: in-progress first, then booked (by scheduled date asc), then completed
+  const sortedTrackable = useMemo(() => {
+    const score = (b: Booking): number => {
+      if (b.booking_status === 'completed') return 3
+      if (b.booking_status === 'booked') return 1
+      return 0 // in-progress states
+    }
+    return [...trackableBookings].sort((a, b) => {
+      const scoreDiff = score(a) - score(b)
+      if (scoreDiff !== 0) return scoreDiff
+      // Within same bucket, earliest scheduled date first
+      const ad = a.scheduled_date || '9999-12-31'
+      const bd = b.scheduled_date || '9999-12-31'
+      return ad.localeCompare(bd)
+    })
+  }, [trackableBookings])
+
+  // Default the selected booking to the highest-priority one
+  const activeBooking = useMemo(() => {
+    if (sortedTrackable.length === 0) return null
+    if (selectedBookingId) {
+      const found = sortedTrackable.find((b) => b.id === selectedBookingId)
+      if (found) return found
+    }
+    return sortedTrackable[0]
+  }, [sortedTrackable, selectedBookingId])
+
   const address = activeBooking
     ? addresses.find((a) => a.id === activeBooking.address_id)
     : null
@@ -180,6 +213,64 @@ export default function TrackService() {
               : 'Live status of your service, updated as your pro moves through each step.'}
         </p>
       </div>
+
+      {/* Booking picker — only show when there are multiple trackable bookings */}
+      {sortedTrackable.length > 1 && (
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Scissors size={18} className="text-[#22C55E]" />
+            <h2 className="text-lg font-semibold text-slate-900">Your Active Bookings</h2>
+            <span className="text-xs bg-green-100 text-[#22C55E] px-2 py-0.5 rounded-full font-medium">
+              {sortedTrackable.length}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {sortedTrackable.map((booking) => {
+              const isSelected = booking.id === activeBooking.id
+              return (
+                <button
+                  key={booking.id}
+                  onClick={() => setSelectedBookingId(booking.id)}
+                  className={`w-full text-left p-3 rounded-xl border-2 transition-all ${
+                    isSelected
+                      ? 'border-[#22C55E] bg-green-50'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                      isSelected ? 'bg-[#22C55E]' : 'bg-slate-100'
+                    }`}>
+                      <Scissors className={isSelected ? 'text-white' : 'text-slate-500'} size={16} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-slate-900 text-sm truncate">
+                        {YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {booking.scheduled_date
+                          ? formatDate(booking.scheduled_date)
+                          : 'Date TBD'}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        booking.booking_status === 'completed'
+                          ? 'bg-slate-100 text-slate-700'
+                          : booking.booking_status === 'booked'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-blue-100 text-blue-700'
+                      }`}
+                    >
+                      {STATUS_LABELS[booking.booking_status] || booking.booking_status}
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
