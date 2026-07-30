@@ -23,11 +23,18 @@ const ACTIVE_STATUSES: Record<string, boolean> = {
   in_progress: true,
 }
 
+// Statuses that should be hidden from the Track Service page
+const HIDDEN_STATUSES: Record<string, boolean> = {
+  cancelled: true,
+}
+
 const STATUS_LABELS: Record<string, string> = {
+  booked: 'Booked',
   provider_assigned: 'Pro Assigned',
   on_the_way: 'On the Way',
   arrived: 'Arrived',
   in_progress: 'In Progress',
+  completed: 'Completed',
 }
 
 const STATUS_ICONS: Record<string, React.ReactNode> = {
@@ -52,11 +59,15 @@ function isToday(iso: string | null): boolean {
 }
 
 function isActiveForTracking(b: Booking): boolean {
-  // A booking is trackable if:
-  // 1. Status is one of the active statuses, OR
-  // 2. Status is 'booked' AND scheduled for today (about to start)
+  // Show in the Track Service page if:
+  // 1. Status is 'booked' (even if not today — user wants to see the timeline start)
+  // 2. Status is one of the in-progress statuses
+  // 3. Status is 'completed' (so user can review)
+  // Hide cancelled bookings.
+  if (HIDDEN_STATUSES[b.booking_status]) return false
+  if (b.booking_status === 'booked') return true
   if (ACTIVE_STATUSES[b.booking_status]) return true
-  if (b.booking_status === 'booked' && isToday(b.scheduled_date)) return true
+  if (b.booking_status === 'completed') return true
   return false
 }
 
@@ -122,9 +133,9 @@ export default function TrackService() {
           <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <Calendar className="text-slate-400" size={32} />
           </div>
-          <h2 className="text-lg font-semibold text-slate-900 mb-2">No Active Service</h2>
+          <h2 className="text-lg font-semibold text-slate-900 mb-2">No bookings to track</h2>
           <p className="text-slate-600 mb-6">
-            You don't have any services being tracked right now. Once your pro accepts a job and heads your way, you'll see live updates here.
+            Once you book a service, you'll see its progress here — from "Booked" all the way through to "Completed."
           </p>
           <Link
             to="/book"
@@ -164,13 +175,21 @@ export default function TrackService() {
       <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div>
-            <h3 className="text-lg font-semibold text-slate-900">Active Service</h3>
+            <h3 className="text-lg font-semibold text-slate-900">
+              {activeBooking.booking_status === 'completed' ? 'Completed Service' : 'Active Service'}
+            </h3>
             <p className="text-slate-600 text-sm">
               {YARD_SIZE_LABELS[activeBooking.yard_size_category] || 'Lawn Service'}
             </p>
           </div>
-          <span className="bg-blue-100 text-blue-700 px-4 py-2 rounded-full font-medium flex items-center gap-2 text-sm">
-            {STATUS_ICONS[activeBooking.booking_status] || <Package className="text-blue-700" size={16} />}
+          <span className={`px-4 py-2 rounded-full font-medium flex items-center gap-2 text-sm ${
+            activeBooking.booking_status === 'completed'
+              ? 'bg-slate-100 text-slate-700'
+              : activeBooking.booking_status === 'booked'
+                ? 'bg-amber-100 text-amber-700'
+                : 'bg-blue-100 text-blue-700'
+          }`}>
+            {STATUS_ICONS[activeBooking.booking_status] || <Package size={16} />}
             {STATUS_LABELS[activeBooking.booking_status] || activeBooking.booking_status}
           </span>
         </div>
@@ -199,13 +218,49 @@ export default function TrackService() {
           </div>
         </div>
 
-        <div className="bg-blue-50 rounded-lg p-4 flex items-center gap-3">
-          <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
-            <Car className="text-white" size={20} />
+        <div className={`rounded-lg p-4 flex items-center gap-3 ${
+          activeBooking.booking_status === 'booked'
+            ? 'bg-amber-50'
+            : activeBooking.booking_status === 'completed'
+              ? 'bg-slate-50'
+              : 'bg-blue-50'
+        }`}>
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+            activeBooking.booking_status === 'booked'
+              ? 'bg-amber-500'
+              : activeBooking.booking_status === 'completed'
+                ? 'bg-slate-500'
+                : 'bg-blue-500'
+          }`}>
+            {activeBooking.booking_status === 'completed' ? (
+              <CheckCircle className="text-white" size={20} />
+            ) : activeBooking.booking_status === 'booked' ? (
+              <Clock className="text-white" size={20} />
+            ) : (
+              <Car className="text-white" size={20} />
+            )}
           </div>
           <div className="flex-1">
-            <p className="text-sm text-blue-600 font-medium">Live status</p>
-            <p className="text-base font-semibold text-blue-700">
+            <p className={`text-sm font-medium ${
+              activeBooking.booking_status === 'booked'
+                ? 'text-amber-600'
+                : activeBooking.booking_status === 'completed'
+                  ? 'text-slate-600'
+                  : 'text-blue-600'
+            }`}>
+              {activeBooking.booking_status === 'booked'
+                ? 'Waiting for a pro to accept'
+                : activeBooking.booking_status === 'completed'
+                  ? 'Service complete'
+                  : 'Live status'}
+            </p>
+            <p className={`text-base font-semibold ${
+              activeBooking.booking_status === 'booked'
+                ? 'text-amber-700'
+                : activeBooking.booking_status === 'completed'
+                  ? 'text-slate-700'
+                  : 'text-blue-700'
+            }`}>
               {STATUS_LABELS[activeBooking.booking_status] || 'Scheduled'}
             </p>
           </div>
@@ -224,7 +279,7 @@ export default function TrackService() {
                     step.status === 'done'
                       ? 'bg-[#22C55E] text-white'
                       : step.status === 'current'
-                        ? 'bg-blue-500 text-white animate-pulse'
+                        ? 'bg-[#22C55E] text-white ring-4 ring-green-100'
                         : 'bg-slate-200 text-slate-400'
                   }`}
                 >
@@ -233,6 +288,11 @@ export default function TrackService() {
                 <div className="flex-1 pt-1">
                   <span className={`font-medium block ${step.status !== 'pending' ? 'text-slate-900' : 'text-slate-400'}`}>
                     {step.label}
+                    {step.status === 'current' && (
+                      <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                        Current
+                      </span>
+                    )}
                   </span>
                   <p className={`text-sm ${step.status !== 'pending' ? 'text-slate-600' : 'text-slate-400'}`}>
                     {step.description}

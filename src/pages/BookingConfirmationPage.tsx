@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { Check, Calendar, MapPin, CreditCard, Download, Mail, Clock, Home, ArrowRight } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 interface BookingConfirmationState {
   bookingId: string
@@ -7,6 +9,7 @@ interface BookingConfirmationState {
   lawnSize: string
   price: number
   date: string
+  paymentIntentId?: string
 }
 
 export default function BookingConfirmationPage() {
@@ -22,6 +25,106 @@ export default function BookingConfirmationPage() {
   const lawnSize = state?.lawnSize || 'Medium Yard'
   const price = state?.price || 45
   const date = state?.date || new Date().toLocaleDateString()
+
+  const [stripeReceiptUrl, setStripeReceiptUrl] = useState<string | null>(null)
+
+  // Try to grab the Stripe-hosted receipt URL (only if a real bookingId was passed in)
+  useEffect(() => {
+    const realBookingId = state?.bookingId
+    if (!realBookingId || realBookingId.startsWith('ML-')) return
+    supabase
+      .from('payments')
+      .select('receipt_url')
+      .eq('booking_id', realBookingId)
+      .eq('status', 'succeeded')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.receipt_url) setStripeReceiptUrl(data.receipt_url)
+      })
+      .catch(() => {
+        // Ignore - we'll fall back to the generated receipt
+      })
+  }, [state?.bookingId])
+
+  // Generate a printable HTML receipt (used as fallback when Stripe receipt isn't available)
+  const handleDownloadReceipt = () => {
+    if (stripeReceiptUrl) {
+      // Open the official Stripe-hosted receipt — looks like a real receipt and supports save-as-PDF
+      window.open(stripeReceiptUrl, '_blank', 'noopener,noreferrer')
+      return
+    }
+
+    const generatedDate = new Date().toLocaleDateString('en-US', {
+      year: 'numeric', month: 'long', day: 'numeric',
+    })
+    const subtotal = Math.max(0, price - 2.99).toFixed(2)
+    const fee = '2.99'
+    const total = price.toFixed(2)
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>MowList Receipt ${bookingId}</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; color: #1e293b; }
+  .header { border-bottom: 2px solid #22C55E; padding-bottom: 16px; margin-bottom: 24px; }
+  .logo { font-size: 24px; font-weight: 800; }
+  .logo .green { color: #22C55E; }
+  .logo .blue { color: #1E40AF; }
+  .meta { text-align: right; color: #64748b; font-size: 13px; }
+  .row { display: flex; justify-content: space-between; padding: 8px 0; }
+  .row.total { font-weight: 700; font-size: 18px; border-top: 1px solid #e2e8f0; padding-top: 12px; margin-top: 12px; }
+  .label { color: #64748b; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-top: 32px; }
+  .booking-id { font-family: monospace; font-weight: 600; color: #22C55E; }
+  .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 12px; text-align: center; }
+  @media print { body { margin: 0; } }
+</style>
+</head>
+<body>
+  <div class="header" style="display: flex; justify-content: space-between; align-items: flex-end;">
+    <div>
+      <div class="logo"><span class="green">Mow</span><span class="blue">List</span></div>
+      <div style="color: #64748b; font-size: 13px; margin-top: 4px;">Lawn care, made simple</div>
+    </div>
+    <div class="meta">
+      <div><strong>Receipt</strong></div>
+      <div>${generatedDate}</div>
+    </div>
+  </div>
+
+  <h2>Booking</h2>
+  <div class="row"><span class="label">Booking ID</span><span class="booking-id">${bookingId}</span></div>
+  <div class="row"><span class="label">Service</span><span>${service}</span></div>
+  <div class="row"><span class="label">Yard size</span><span>${lawnSize}</span></div>
+  <div class="row"><span class="label">Service date</span><span>${date}</span></div>
+
+  <h2>Payment</h2>
+  <div class="row"><span class="label">${service} (${lawnSize})</span><span>$${subtotal}</span></div>
+  <div class="row"><span class="label">Service fee</span><span>$${fee}</span></div>
+  <div class="row total"><span>Total paid</span><span>$${total}</span></div>
+
+  <div class="footer">
+    Payment held until service is complete. MowList takes a small platform fee to keep the lights on.<br />
+    Questions? hello@mowlist.com
+  </div>
+
+  <script>
+    // Auto-open the print dialog so the user can save as PDF or print
+    window.onload = function() { setTimeout(function() { window.print(); }, 250); };
+  </script>
+</body>
+</html>`
+
+    const win = window.open('', '_blank', 'noopener,noreferrer')
+    if (win) {
+      win.document.write(html)
+      win.document.close()
+    }
+  }
 
   return (
     <div className="pt-24 pb-16 bg-slate-50 min-h-screen">
@@ -137,11 +240,17 @@ export default function BookingConfirmationPage() {
 
         {/* Actions */}
         <div className="flex flex-col sm:flex-row gap-4">
-          <button className="flex-1 flex items-center justify-center gap-2 bg-[#22C55E] text-white px-6 py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors">
+          <button
+            onClick={handleDownloadReceipt}
+            className="flex-1 flex items-center justify-center gap-2 bg-[#22C55E] text-white px-6 py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors"
+          >
             <Download size={20} />
-            Download Receipt
+            {stripeReceiptUrl ? 'View Receipt' : 'Download Receipt'}
           </button>
-          <button className="flex-1 flex items-center justify-center gap-2 bg-white border border-slate-300 text-slate-700 px-6 py-3 rounded-xl font-semibold hover:bg-slate-50 transition-colors">
+          <button
+            onClick={() => alert('Email receipts are coming with our notification system. For now, use "Download Receipt" to get a copy.')}
+            className="flex-1 flex items-center justify-center gap-2 bg-white border border-slate-300 text-slate-700 px-6 py-3 rounded-xl font-semibold hover:bg-slate-50 transition-colors"
+          >
             <Mail size={20} />
             Resend Email
           </button>
