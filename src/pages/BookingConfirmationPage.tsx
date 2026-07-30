@@ -13,7 +13,11 @@ export default function BookingConfirmationPage() {
   const location = useLocation()
   const state = location.state as BookingConfirmationState | null
 
-  const bookingId = state?.bookingId || 'ML-' + Math.random().toString(36).substr(2, 9).toUpperCase()
+  const fullBookingId = state?.bookingId || 'ML-' + Math.random().toString(36).substr(2, 9).toUpperCase()
+  // Show a short, friendly booking reference (last 8 chars) for the UI
+  const bookingId = fullBookingId.length > 12
+    ? `#${fullBookingId.slice(-8).toUpperCase()}`
+    : fullBookingId
   const service = state?.service || 'Lawn Mowing'
   const lawnSize = state?.lawnSize || 'Medium Yard'
   const price = state?.price || 45
@@ -37,8 +41,18 @@ export default function BookingConfirmationPage() {
           <div className="bg-gradient-to-r from-[#22C55E] to-emerald-600 px-6 py-4">
             <div className="flex items-center justify-between">
               <span className="text-white/80 text-sm">Booking ID</span>
-              <span className="text-white font-mono font-semibold text-lg">{bookingId}</span>
+              <span
+                className="text-white font-mono font-semibold text-lg"
+                title={fullBookingId}
+              >
+                {bookingId}
+              </span>
             </div>
+            {fullBookingId !== bookingId && (
+              <div className="text-white/60 text-xs mt-1 text-right font-mono">
+                {fullBookingId}
+              </div>
+            )}
           </div>
 
           {/* Service Details */}

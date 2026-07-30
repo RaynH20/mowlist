@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { Home, Calendar, MapPin, CreditCard, Settings, LogOut, Menu, X } from 'lucide-react'
+import { Home, Calendar, MapPin, CreditCard, Settings, LogOut, Menu, X, Plus } from 'lucide-react'
 import { useState } from 'react'
 
 export default function DashboardLayout() {
@@ -20,6 +20,17 @@ export default function DashboardLayout() {
         <Link to="/" className="text-xl font-bold" onClick={() => setIsMobileMenuOpen(false)}>
           <span className="text-[#22C55E]">Mow</span>
           <span className="text-[#1E40AF]">List</span>
+        </Link>
+      </div>
+      {/* Book Service button - always visible, prominent */}
+      <div className="p-4 border-b">
+        <Link
+          to="/book"
+          onClick={() => setIsMobileMenuOpen(false)}
+          className="flex items-center justify-center gap-2 w-full bg-[#22C55E] text-white px-4 py-3 rounded-lg font-semibold hover:bg-[#16A34A] transition-colors shadow-sm"
+        >
+          <Plus size={20} />
+          Book a Service
         </Link>
       </div>
       <nav className="px-4 py-4">

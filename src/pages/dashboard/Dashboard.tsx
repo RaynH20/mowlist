@@ -277,13 +277,13 @@ export default function Dashboard() {
 
       {/* Quick Actions - Always visible */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
-        <Link to="/book" className="bg-white rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
-          <h3 className="font-medium text-slate-900 text-sm mb-1">Book Service</h3>
-          <p className="text-slate-500 text-xs">Schedule lawn care</p>
-        </Link>
         <Link to="/book" className="bg-[#22C55E] rounded-lg p-4 hover:bg-[#16A34A] transition-colors">
-          <h3 className="font-medium text-white text-sm mb-1">Quick Book</h3>
-          <p className="text-green-100 text-xs">Fast scheduling</p>
+          <h3 className="font-medium text-white text-sm mb-1">Book a Service</h3>
+          <p className="text-green-100 text-xs">Schedule your next mow</p>
+        </Link>
+        <Link to="/dashboard/services" className="bg-white rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow border border-slate-100">
+          <h3 className="font-medium text-slate-900 text-sm mb-1">View All Services</h3>
+          <p className="text-slate-500 text-xs">See your full history</p>
         </Link>
       </div>
     </div>

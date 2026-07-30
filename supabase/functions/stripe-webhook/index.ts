@@ -147,6 +147,8 @@ serve(async (req) => {
         const pi = event.data.object
         const bookingId = pi.metadata?.booking_id
         const userId = pi.metadata?.mowlist_user_id
+        const customerId = pi.customer
+        const paymentMethodId = pi.payment_method
 
         // Update or insert payment record
         await supabaseAdmin.from('payments').upsert(
@@ -155,7 +157,7 @@ serve(async (req) => {
             customer_id: userId,
             stripe_payment_intent_id: pi.id,
             stripe_charge_id: pi.latest_charge,
-            stripe_payment_method_id: pi.payment_method,
+            stripe_payment_method_id: paymentMethodId,
             amount: pi.amount / 100,
             currency: pi.currency,
             status: 'succeeded',
@@ -173,6 +175,53 @@ serve(async (req) => {
             .from('bookings')
             .update({ payment_status: 'paid' })
             .eq('id', bookingId)
+        }
+
+        // Belt-and-suspenders: explicitly attach the payment method to the customer
+        // (in case setup_future_usage didn't auto-attach it)
+        if (customerId && paymentMethodId) {
+          try {
+            // Attach to customer (idempotent — Stripe ignores if already attached)
+            const attachResp = await fetch(
+              `https://api.stripe.com/v1/payment_methods/${paymentMethodId}/attach`,
+              {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${STRIPE_SECRET_KEY}`,
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `customer=${customerId}`,
+              }
+            )
+            const attachData = await attachResp.json()
+            if (!attachResp.ok && attachData.error?.code !== 'resource_already_attached') {
+              console.error('Failed to attach payment method:', JSON.stringify(attachData.error))
+            } else {
+              console.log(`Payment method ${paymentMethodId} attached to customer ${customerId}`)
+            }
+          } catch (attachErr) {
+            console.error('Attach payment method error:', attachErr)
+          }
+
+          // If this is the user's first payment method, set it as default
+          if (userId) {
+            try {
+              const { data: user } = await supabaseAdmin
+                .from('users')
+                .select('default_payment_method_id')
+                .eq('id', userId)
+                .single()
+              if (!user?.default_payment_method_id) {
+                await supabaseAdmin
+                  .from('users')
+                  .update({ default_payment_method_id: paymentMethodId })
+                  .eq('id', userId)
+                console.log(`Set default payment method for user ${userId}`)
+              }
+            } catch (defaultErr) {
+              console.error('Set default error:', defaultErr)
+            }
+          }
         }
 
         console.log(`Payment succeeded for booking ${bookingId}`)
