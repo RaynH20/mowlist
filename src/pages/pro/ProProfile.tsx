@@ -42,6 +42,11 @@ export default function ProProfile() {
     service_radius_miles: 10,
     is_available: true,
     profile_image_url: '',
+    // Stripe Connect — needed by the StripeConnectSection below
+    stripe_connect_account_id: null as string | null,
+    stripe_connect_charges_enabled: null as boolean | null,
+    stripe_connect_payouts_enabled: null as boolean | null,
+    stripe_connect_onboarding_complete: null as boolean | null,
   })
   const [originalProfile, setOriginalProfile] = useState(profile)
 
@@ -67,6 +72,10 @@ export default function ProProfile() {
           service_radius_miles: profileData.service_radius_miles || 10,
           is_available: profileData.is_available ?? true,
           profile_image_url: profileData.profile_image_url || '',
+          stripe_connect_account_id: profileData.stripe_connect_account_id || null,
+          stripe_connect_charges_enabled: profileData.stripe_connect_charges_enabled ?? null,
+          stripe_connect_payouts_enabled: profileData.stripe_connect_payouts_enabled ?? null,
+          stripe_connect_onboarding_complete: profileData.stripe_connect_onboarding_complete ?? null,
         })
       }
 
@@ -419,10 +428,10 @@ export default function ProProfile() {
 
       {/* Stripe Connect - Verification & Payouts */}
       <StripeConnectSection
-        connectAccountId={profile.stripe_connect_account_id as any}
-        chargesEnabled={profile.stripe_connect_charges_enabled as any}
-        payoutsEnabled={profile.stripe_connect_payouts_enabled as any}
-        onboardingComplete={profile.stripe_connect_onboarding_complete as any}
+        connectAccountId={profile.stripe_connect_account_id}
+        chargesEnabled={profile.stripe_connect_charges_enabled}
+        payoutsEnabled={profile.stripe_connect_payouts_enabled}
+        onboardingComplete={profile.stripe_connect_onboarding_complete}
         onUpdate={fetchAll}
       />
     </div>

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import {
   MapPin, Clock, DollarSign, Check, X, Briefcase, Calendar,
   CheckCircle, ChevronDown, ChevronUp, RefreshCw, Phone, AlertCircle,
-  User, Mail, Loader2, ExternalLink
+  User, Mail, Loader2, ExternalLink, CreditCard
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
-import { acceptJob, declineJob, updateProviderProfile } from '../../lib/api'
+import { acceptJob, declineJob, updateProviderProfile, getProviderProfile } from '../../lib/api'
 import {
   getAvailableJobsWithDetails,
   getProAssignedJobsWithDetails,
@@ -22,6 +23,9 @@ export default function ProJobs() {
   const [isAvailable, setIsAvailable] = useState(true)
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  // Stripe Connect onboarding state — shows a banner if not fully set up
+  const [stripeReady, setStripeReady] = useState<boolean | null>(null)
+  const [stripeConnectAccountId, setStripeConnectAccountId] = useState<string | null>(null)
 
   useEffect(() => {
     if (user) fetchJobs()
@@ -31,14 +35,21 @@ export default function ProJobs() {
     if (!user) return
     setLoading(true)
     try {
-      const [availRes, assignedRes] = await Promise.all([
+      const [availRes, assignedRes, profileRes] = await Promise.all([
         getAvailableJobsWithDetails(),
         getProAssignedJobsWithDetails(user.id),
+        getProviderProfile(user.id),
       ])
       if (availRes.error) console.error('Error loading available jobs:', availRes.error)
       if (assignedRes.error) console.error('Error loading assigned jobs:', assignedRes.error)
       setAvailableJobs(availRes.data || [])
       setAssignedJobs(assignedRes.data || [])
+      // Compute Stripe Connect readiness for the banner
+      const pd: any = profileRes.data
+      setStripeConnectAccountId(pd?.stripe_connect_account_id || null)
+      setStripeReady(
+        !!(pd?.stripe_connect_charges_enabled && pd?.stripe_connect_payouts_enabled)
+      )
     } catch (error) {
       console.error('Error fetching jobs:', error)
     } finally {
@@ -151,6 +162,33 @@ export default function ProJobs() {
         >
           {toast.message}
         </div>
+      )}
+
+      {/* Stripe Connect onboarding banner — shown when pro isn't fully set up */}
+      {stripeReady === false && (
+        <Link
+          to="/pro/profile"
+          className="block bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-200 rounded-xl p-4 mb-6 hover:border-amber-300 transition-colors"
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center flex-shrink-0">
+              <CreditCard className="text-white" size={20} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-amber-900 text-sm">
+                {stripeConnectAccountId
+                  ? 'Finish your Stripe setup to start earning'
+                  : 'Set up payouts to start accepting jobs'}
+              </p>
+              <p className="text-xs text-amber-800 mt-1">
+                {stripeConnectAccountId
+                  ? "You've started Stripe onboarding but haven't finished yet. Complete it to receive payments."
+                  : "MowList uses Stripe to pay you directly. It takes about 3 minutes — you'll need your bank account and ID."}
+              </p>
+            </div>
+            <ExternalLink className="text-amber-600 flex-shrink-0" size={18} />
+          </div>
+        </Link>
       )}
 
       {/* Availability toggle */}
