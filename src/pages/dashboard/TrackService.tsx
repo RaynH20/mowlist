@@ -167,7 +167,10 @@ export default function TrackService() {
     ? addresses.find((a) => a.id === activeBooking.address_id)
     : null
 
-  if (!activeBooking) {
+  // Empty state: only show if there are NO trackable bookings at all.
+  // (Previously checked !activeBooking which was the expanded booking, but
+  // that meant all-collapsed multi-booking pages also hit the empty state.)
+  if (sortedTrackable.length === 0) {
     return (
       <div>
         <h1 className="text-2xl font-bold text-slate-900 mb-6">Track Service</h1>
