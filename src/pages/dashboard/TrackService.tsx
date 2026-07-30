@@ -170,14 +170,21 @@ export default function TrackService() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-slate-900 mb-6">Track Service</h1>
+      <div className="mb-5">
+        <h1 className="text-2xl font-bold text-slate-900">Track Service</h1>
+        <p className="text-sm text-slate-500 mt-1">
+          {activeBooking.booking_status === 'completed'
+            ? 'This service is done — thanks for using MowList!'
+            : activeBooking.booking_status === 'booked'
+              ? "We're matching you with a pro. We'll update this page as it moves along."
+              : 'Live status of your service, updated as your pro moves through each step.'}
+        </p>
+      </div>
 
       <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div>
-            <h3 className="text-lg font-semibold text-slate-900">
-              {activeBooking.booking_status === 'completed' ? 'Completed Service' : 'Active Service'}
-            </h3>
+            <h3 className="text-lg font-semibold text-slate-900">Your Service</h3>
             <p className="text-slate-600 text-sm">
               {YARD_SIZE_LABELS[activeBooking.yard_size_category] || 'Lawn Service'}
             </p>
@@ -268,7 +275,10 @@ export default function TrackService() {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">Service Status</h3>
+        <div className="flex items-center gap-2 mb-4">
+          <Clock size={18} className="text-[#22C55E]" />
+          <h3 className="text-lg font-semibold text-slate-900">Service Progress</h3>
+        </div>
         <div className="relative">
           <div className="absolute left-4 top-2 bottom-2 w-0.5 bg-slate-200"></div>
           <div className="space-y-6">
@@ -304,23 +314,38 @@ export default function TrackService() {
         </div>
       </div>
 
+      {/* Pro actions (disabled until a pro is assigned) */}
       <div className="grid grid-cols-2 gap-4">
-        <button className="bg-white rounded-lg p-4 shadow-sm flex items-center gap-3 hover:shadow-md transition-shadow" disabled>
-          <div className="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center">
-            <MessageCircle className="text-slate-400" size={18} />
+        <button
+          className="bg-white rounded-lg p-4 shadow-sm flex items-center gap-3 hover:shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          disabled={activeBooking.booking_status === 'booked' || activeBooking.booking_status === 'completed'}
+        >
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+            activeBooking.booking_status === 'booked' ? 'bg-slate-200' : 'bg-blue-100'
+          }`}>
+            <MessageCircle className={activeBooking.booking_status === 'booked' ? 'text-slate-400' : 'text-blue-500'} size={18} />
           </div>
           <div className="text-left">
-            <h3 className="font-medium text-slate-400 text-sm">Message Pro</h3>
-            <p className="text-slate-400 text-xs">Coming with Stripe</p>
+            <h3 className="font-medium text-slate-900 text-sm">Message Pro</h3>
+            <p className="text-slate-500 text-xs">
+              {activeBooking.booking_status === 'booked' ? 'Available once matched' : 'Send a quick message'}
+            </p>
           </div>
         </button>
-        <button className="bg-white rounded-lg p-4 shadow-sm flex items-center gap-3 hover:shadow-md transition-shadow" disabled>
-          <div className="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center">
-            <Camera className="text-slate-400" size={18} />
+        <button
+          className="bg-white rounded-lg p-4 shadow-sm flex items-center gap-3 hover:shadow-md transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          disabled={activeBooking.booking_status !== 'completed'}
+        >
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+            activeBooking.booking_status === 'completed' ? 'bg-green-100' : 'bg-slate-200'
+          }`}>
+            <Camera className={activeBooking.booking_status === 'completed' ? 'text-green-500' : 'text-slate-400'} size={18} />
           </div>
           <div className="text-left">
-            <h3 className="font-medium text-slate-400 text-sm">Photos</h3>
-            <p className="text-slate-400 text-xs">After completion</p>
+            <h3 className="font-medium text-slate-900 text-sm">Service Photos</h3>
+            <p className="text-slate-500 text-xs">
+              {activeBooking.booking_status === 'completed' ? 'View before/after' : 'After the visit'}
+            </p>
           </div>
         </button>
       </div>
