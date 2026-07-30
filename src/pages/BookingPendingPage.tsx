@@ -22,7 +22,6 @@ interface PendingBooking {
   } | null
   pro: {
     display_name: string | null
-    phone: string | null
   } | null
 }
 
@@ -72,7 +71,7 @@ export default function BookingPendingPage() {
             id, booking_status, estimated_price, scheduled_date, scheduled_time_window,
             yard_size_category, service_frequency, provider_id, payment_status,
             address:addresses(street_1, city, state, zip_code),
-            pro:provider_profiles(display_name, phone)
+            pro:provider_profiles(display_name)
           `)
           .eq('id', bookingId)
           .eq('customer_id', user.id)

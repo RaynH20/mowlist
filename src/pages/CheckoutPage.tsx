@@ -105,7 +105,7 @@ function CheckoutForm() {
         id, booking_status, estimated_price, scheduled_date, scheduled_time_window,
         yard_size_category, service_frequency, address_id,
         address:addresses(street_1, city, state, zip_code),
-        pro:provider_profiles(display_name, phone)
+        pro:provider_profiles(display_name)
       `)
       .eq('id', existingBookingId)
       .eq('customer_id', user.id)
