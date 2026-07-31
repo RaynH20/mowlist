@@ -1,3 +1,11 @@
+-- Add pro_payout_amount and platform_fee to the payments table.
+-- The webhook needs these to track how the customer's payment is split
+-- between MowList (platform fee) and the pro (their payout).
+
+ALTER TABLE payments
+  ADD COLUMN IF NOT EXISTS platform_fee DECIMAL(10,2),
+  ADD COLUMN IF NOT EXISTS pro_payout_amount DECIMAL(10,2);
+
 -- Backfill provider_payout_amount and platform_fee for completed bookings
 -- that don't have these set yet. The webhook only started saving these
 -- in the latest version, so all pre-existing completed bookings show $0.
