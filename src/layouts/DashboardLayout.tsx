@@ -2,6 +2,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Home, Calendar, MapPin, CreditCard, Settings, LogOut, Menu, X, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useAuth } from '../lib/auth-context'
+import Header from '../components/Header'
 
 export default function DashboardLayout() {
   const location = useLocation()
@@ -72,7 +73,8 @@ export default function DashboardLayout() {
   )
 
   return (
-    <div className="pt-16 min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50">
+      <Header />
       {/* Mobile menu button - fixed top right below header */}
       <button
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}

@@ -2,6 +2,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Briefcase, Calendar, DollarSign, MapPin, User, LogOut, Home, Menu, X } from 'lucide-react'
 import { useState } from 'react'
 import { useAuth } from '../lib/auth-context'
+import Header from '../components/Header'
 
 export default function ProLayout() {
   const location = useLocation()
@@ -77,7 +78,8 @@ export default function ProLayout() {
   )
 
   return (
-    <div className="pt-16 min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50">
+      <Header />
       {/* Mobile menu button - fixed top right below header */}
       <button
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}

@@ -55,9 +55,6 @@ export default function Header() {
             <Link to="/for-pros" className="text-slate-600 hover:text-[#22C55E] transition-colors font-medium">
               For Pros
             </Link>
-            <Link to="/safety" className="text-slate-600 hover:text-[#22C55E] transition-colors font-medium">
-              Trust & Safety
-            </Link>
           </nav>
 
           {/* CTA Buttons */}
@@ -158,13 +155,6 @@ export default function Header() {
                 onClick={() => setIsMenuOpen(false)}
               >
                 For Pros
-              </Link>
-              <Link
-                to="/safety"
-                className="text-slate-600 hover:text-[#22C55E] transition-colors font-medium"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                Trust & Safety
               </Link>
               <div className="flex flex-col space-y-3 pt-4 border-t">
                 {user ? (

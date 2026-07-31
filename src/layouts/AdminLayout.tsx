@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Users, UserCheck, Calendar, DollarSign, AlertTriangle, BarChart3, LogOut, Home } from 'lucide-react'
 import { useAuth } from '../lib/auth-context'
+import Header from '../components/Header'
 
 export default function AdminLayout() {
   const location = useLocation()
@@ -24,7 +25,8 @@ export default function AdminLayout() {
   const isActive = (path: string) => location.pathname === path
 
   return (
-    <div className="pt-16 min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50">
+      <Header />
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex w-64 bg-slate-900 text-white fixed h-full flex-col">
         <div className="p-6">
