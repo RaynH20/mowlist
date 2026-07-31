@@ -29,10 +29,20 @@ export default function ProLayout() {
   const sidebarContent = (
     <>
       <div className="p-6 border-b border-blue-800">
-        <Link to="/" className="text-xl font-bold" onClick={() => setIsMobileMenuOpen(false)}>
-          <span className="text-[#22C55E]">MowList</span>
-          <span className="text-white"> Pro</span>
-        </Link>
+        <div className="flex items-start justify-between gap-2">
+          <Link to="/" className="text-xl font-bold" onClick={() => setIsMobileMenuOpen(false)}>
+            <span className="text-[#22C55E]">MowList</span>
+            <span className="text-white"> Pro</span>
+          </Link>
+          <button
+            onClick={handleSignOut}
+            title="Sign out"
+            aria-label="Sign out"
+            className="p-1.5 text-blue-200 hover:text-white hover:bg-white/10 rounded-md transition-colors flex-shrink-0"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
         {user?.email && (
           <p className="text-xs text-blue-200 mt-1 truncate">{user.email}</p>
         )}

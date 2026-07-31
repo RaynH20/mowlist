@@ -46,6 +46,7 @@ import AccountSettings from './pages/dashboard/AccountSettings'
 // Pro Dashboard
 import ProLayout from './layouts/ProLayout'
 import ProJobs from './pages/pro/ProJobs'
+import ProDashboard from './pages/pro/ProDashboard'
 import ProSchedule from './pages/pro/ProSchedule'
 import ProEarnings from './pages/pro/ProEarnings'
 import ProArea from './pages/pro/ProArea'
@@ -165,7 +166,7 @@ function AppRoutes() {
 
           {/* Pro Dashboard */}
           <Route path="/pro" element={<ProtectedRoute allowedRoles={['provider']}><ProLayout /></ProtectedRoute>}>
-            <Route index element={<ProJobs />} />
+            <Route index element={<ProDashboard />} />
             <Route path="available" element={<ProJobs />} />
             <Route path="schedule" element={<ProSchedule />} />
             <Route path="earnings" element={<ProEarnings />} />
