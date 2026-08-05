@@ -572,68 +572,68 @@ function StripeConnectSection({
         </div>
       )}
 
-      {/* What to expect — explains the Stripe redirect so pros aren't surprised */}
-      {!isFullyOnboarded && (
-        <div className="mt-5 border-t border-slate-100 pt-5">
-          <details className="group">
-            <summary className="flex items-center justify-between cursor-pointer text-sm font-medium text-slate-700 hover:text-slate-900">
-              <span className="flex items-center gap-2">
-                <Info size={16} className="text-slate-400" />
-                What happens when I click the button?
-              </span>
-              <ChevronDown size={16} className="text-slate-400 transition-transform group-open:rotate-180" />
-            </summary>
-            <div className="mt-4 space-y-4 text-sm text-slate-600">
-              {/* The 3 steps */}
-              <div className="space-y-3">
-                <Step
-                  num={1}
-                  title="You'll be sent to Stripe"
-                  desc="MowList uses Stripe to handle payments and identity verification. The button opens Stripe's secure site in this same tab."
-                />
-                <Step
-                  num={2}
-                  title="Enter your info on Stripe's site"
-                  desc="Takes about 3–5 minutes. You'll need: your bank account & routing number, the last 4 digits of your SSN, and your home address."
-                />
-                <Step
-                  num={3}
-                  title="Come back here and start earning"
-                  desc="Stripe sends you back to MowList automatically when you're done. We'll email you when money hits your bank."
-                />
-              </div>
-
-              {/* Why Stripe? */}
-              <div className="bg-slate-50 rounded-lg p-4 mt-4 space-y-2">
-                <p className="font-medium text-slate-900">Why Stripe?</p>
-                <ul className="space-y-1.5 text-xs text-slate-600">
-                  <li className="flex gap-2"><Lock size={12} className="text-slate-400 flex-shrink-0 mt-0.5" />MowList never sees your bank account — Stripe keeps it encrypted and secure.</li>
-                  <li className="flex gap-2"><FileText size={12} className="text-slate-400 flex-shrink-0 mt-0.5" />Your 1099 tax form is generated automatically — no paperwork.</li>
-                  <li className="flex gap-2"><Shield size={12} className="text-slate-400 flex-shrink-0 mt-0.5" />Stripe verifies your identity, which protects customers and you.</li>
-                  <li className="flex gap-2"><Clock size={12} className="text-slate-400 flex-shrink-0 mt-0.5" />Payouts arrive in your bank on a 2-day rolling basis (daily after a few weeks).</li>
-                </ul>
-              </div>
-
-              {/* Need help link */}
-              <div className="text-xs text-slate-500 pt-2">
-                Questions?{' '}
-                <Link to="/contact" className="text-[#22C55E] hover:underline font-medium">
-                  Contact us
-                </Link>
-                {' '}or check Stripe's{' '}
-                <a
-                  href="https://support.stripe.com/topics/connect-onboarding"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[#22C55E] hover:underline font-medium"
-                >
-                  Connect onboarding guide
-                </a>.
-              </div>
+      {/* What to expect — explains the Stripe redirect so pros aren't surprised.
+          Always visible (collapsed for verified pros) so they can reference
+          the explainer anytime, and open by default for new pros who need it. */}
+      <div className="mt-5 border-t border-slate-100 pt-5">
+        <details className="group" open={!isFullyOnboarded}>
+          <summary className="flex items-center justify-between cursor-pointer text-sm font-medium text-slate-700 hover:text-slate-900">
+            <span className="flex items-center gap-2">
+              <Info size={16} className="text-slate-400" />
+              How payouts work
+            </span>
+            <ChevronDown size={16} className="text-slate-400 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="mt-4 space-y-4 text-sm text-slate-600">
+            {/* The 3 steps */}
+            <div className="space-y-3">
+              <Step
+                num={1}
+                title="You'll be sent to Stripe"
+                desc="MowList uses Stripe to handle payments and identity verification. The button opens Stripe's secure site in this same tab."
+              />
+              <Step
+                num={2}
+                title="Enter your info on Stripe's site"
+                desc="Takes about 3–5 minutes. You'll need: your bank account & routing number, the last 4 digits of your SSN, and your home address."
+              />
+              <Step
+                num={3}
+                title="Come back here and start earning"
+                desc="Stripe sends you back to MowList automatically when you're done. We'll email you when money hits your bank."
+              />
             </div>
-          </details>
-        </div>
-      )}
+
+            {/* Why Stripe? */}
+            <div className="bg-slate-50 rounded-lg p-4 mt-4 space-y-2">
+              <p className="font-medium text-slate-900">Why Stripe?</p>
+              <ul className="space-y-1.5 text-xs text-slate-600">
+                <li className="flex gap-2"><Lock size={12} className="text-slate-400 flex-shrink-0 mt-0.5" />MowList never sees your bank account — Stripe keeps it encrypted and secure.</li>
+                <li className="flex gap-2"><FileText size={12} className="text-slate-400 flex-shrink-0 mt-0.5" />Your 1099 tax form is generated automatically — no paperwork.</li>
+                <li className="flex gap-2"><Shield size={12} className="text-slate-400 flex-shrink-0 mt-0.5" />Stripe verifies your identity, which protects customers and you.</li>
+                <li className="flex gap-2"><Clock size={12} className="text-slate-400 flex-shrink-0 mt-0.5" />Payouts arrive in your bank on a 2-day rolling basis (daily after a few weeks).</li>
+              </ul>
+            </div>
+
+            {/* Need help link */}
+            <div className="text-xs text-slate-500 pt-2">
+              Questions?{' '}
+              <Link to="/contact" className="text-[#22C55E] hover:underline font-medium">
+                Contact us
+              </Link>
+              {' '}or check Stripe's{' '}
+              <a
+                href="https://support.stripe.com/topics/connect-onboarding"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#22C55E] hover:underline font-medium"
+              >
+                Connect onboarding guide
+              </a>.
+            </div>
+          </div>
+        </details>
+      </div>
 
       <p className="text-xs text-slate-500 mt-3">
         Stripe handles your bank info, tax forms (1099s), and identity verification. MowList never sees your bank account.
