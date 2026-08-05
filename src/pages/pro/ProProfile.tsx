@@ -225,16 +225,41 @@ export default function ProProfile() {
           <div className="flex-1 min-w-0">
             <h2 className="font-semibold text-slate-900 truncate">{profile.display_name || 'Add your name'}</h2>
             <p className="text-sm text-slate-500 truncate">{user?.email}</p>
-            <button
-              type="button"
-              onClick={() => {
-                const url = window.prompt('Enter photo URL (or leave blank to remove):', profile.profile_image_url)
-                if (url !== null) setProfile({ ...profile, profile_image_url: url })
-              }}
-              className="text-sm text-[#22C55E] hover:text-[#16A34A] font-medium mt-1 inline-flex items-center gap-1"
-            >
-              <Camera size={14} /> {profile.profile_image_url ? 'Change photo' : 'Add photo'}
-            </button>
+            <div className="flex items-center gap-3 mt-1">
+              <label className="text-sm text-[#22C55E] hover:text-[#16A34A] font-medium inline-flex items-center gap-1 cursor-pointer">
+                <Camera size={14} /> {profile.profile_image_url ? 'Change photo' : 'Add photo'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    // Limit to 2MB to keep the data URL reasonable
+                    if (file.size > 2 * 1024 * 1024) {
+                      alert('Image must be under 2MB. Try compressing it first.')
+                      return
+                    }
+                    const reader = new FileReader()
+                    reader.onload = () => {
+                      setProfile({ ...profile, profile_image_url: reader.result as string })
+                    }
+                    reader.readAsDataURL(file)
+                    // Clear the input so re-selecting the same file fires onChange again
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+              {profile.profile_image_url && (
+                <button
+                  type="button"
+                  onClick={() => setProfile({ ...profile, profile_image_url: null })}
+                  className="text-sm text-slate-500 hover:text-red-500 font-medium"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

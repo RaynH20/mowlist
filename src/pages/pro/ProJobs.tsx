@@ -13,6 +13,7 @@ import {
   updateBookingProgress,
   type ProBookingWithDetails
 } from '../../lib/proDashboard'
+import { serviceTypeLabel, yardSizeLabel } from '../../lib/labels'
 
 export default function ProJobs() {
   const { user } = useAuth()
@@ -412,11 +413,11 @@ function AvailableJobCard({
         </div>
 
         <div className="flex flex-wrap gap-2 mb-4">
-          <span className="bg-slate-100 text-slate-700 px-3 py-1 rounded-full text-xs font-medium capitalize">
-            {job.service_type}
+          <span className="bg-slate-100 text-slate-700 px-3 py-1 rounded-full text-xs font-medium">
+            {serviceTypeLabel(job.service_type)}
           </span>
-          <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium capitalize">
-            {job.yard_size_category} yard
+          <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            {yardSizeLabel(job.yard_size_category)}
           </span>
           <span className="bg-purple-50 text-purple-700 px-3 py-1 rounded-full text-xs font-medium">
             {formatDate(job.scheduled_date)} · {job.scheduled_time_window || 'Time TBD'}
@@ -523,8 +524,8 @@ function AssignedJobCard({
           <span className="flex items-center gap-1">
             <Clock size={14} /> {formatDate(job.scheduled_date)} · {job.scheduled_time_window || 'Time TBD'}
           </span>
-          <span className="capitalize flex items-center gap-1">
-            <User size={14} /> {job.service_type}
+          <span className="flex items-center gap-1">
+            <User size={14} /> {serviceTypeLabel(job.service_type)}
           </span>
         </div>
       </div>

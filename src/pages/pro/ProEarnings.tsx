@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { getProEarningsBreakdown, type ProBookingWithDetails } from '../../lib/proDashboard'
+import { serviceTypeLabel } from '../../lib/labels'
 
 export default function ProEarnings() {
   const { user } = useAuth()
@@ -179,7 +180,7 @@ export default function ProEarnings() {
                   <p className="text-xs text-slate-400 mt-0.5">
                     {formatDate(job.completed_at || job.scheduled_date)}
                     {' · '}
-                    <span className="capitalize">{job.service_type}</span>
+                    <span>{serviceTypeLabel(job.service_type)}</span>
                   </p>
                 </div>
                 <div className="text-right flex-shrink-0">

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { getProAssignedJobsWithDetails, type ProBookingWithDetails } from '../../lib/proDashboard'
+import { serviceTypeLabel, yardSizeLabel } from '../../lib/labels'
 
 type StatusFilter = 'all' | 'active' | 'completed'
 
@@ -215,11 +216,11 @@ function ScheduleRow({ job, onClick }: { job: ProBookingWithDetails; onClick: ()
             {job.customer_name || 'Customer'}
           </p>
           <p className="text-xs text-slate-500 truncate flex items-center gap-1 mt-0.5">
-            <MapPin size={11} />
-            {job.address_city || '—'}, {job.address_state || ''}
+            <MapPin size={11} className="flex-shrink-0" />
+            {job.address_line ? `${job.address_line}, ` : ''}{job.address_city || '—'}, {job.address_state || ''}
           </p>
           <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs text-slate-400 capitalize">{job.service_type}</span>
+            <span className="text-xs text-slate-400">{serviceTypeLabel(job.service_type)}</span>
             <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${status.className}`}>
               {status.label}
             </span>
@@ -313,8 +314,8 @@ function JobDetailModal({ job, onClose }: { job: ProBookingWithDetails; onClose:
           {/* Service */}
           <div>
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Service</p>
-            <p className="text-sm text-slate-700 capitalize">
-              {job.service_type} · <span className="capitalize">{job.yard_size_category}</span> yard
+            <p className="text-sm text-slate-700">
+              {serviceTypeLabel(job.service_type)} · {yardSizeLabel(job.yard_size_category)}
             </p>
             {job.service_frequency && job.service_frequency !== 'one_time' && (
               <p className="text-xs text-purple-700 bg-purple-50 inline-block px-2 py-0.5 rounded mt-1">
