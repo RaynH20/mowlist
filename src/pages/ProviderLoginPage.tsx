@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Mail, Lock, Eye, EyeOff, Shield, Briefcase, AlertCircle, CheckCircle } from 'lucide-react'
+import { Mail, Lock, Eye, EyeOff, Shield, Briefcase, AlertCircle, CheckCircle, X, ArrowRight } from 'lucide-react'
 import { useAuth } from '../lib/auth-context'
 
 export default function ProviderLoginPage() {
@@ -8,6 +8,7 @@ export default function ProviderLoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [correctLoginPath, setCorrectLoginPath] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const { signIn } = useAuth()
@@ -15,26 +16,14 @@ export default function ProviderLoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    setCorrectLoginPath(null)
     setLoading(true)
 
-    const { error } = await signIn(email, password, 'provider')
+    const { error, wrongRole, correctLoginPath: path } = await signIn(email, password, 'provider')
 
     if (error) {
       setError(error.message || 'Invalid credentials')
-      setLoading(false)
-      return
-    }
-
-    // Check role - if not a provider, redirect them to the right place
-    const { data: profile } = await import('../lib/supabase').then(m => m.supabase
-      .from('users')
-      .select('role')
-      .eq('email', email)
-      .single()
-    )
-
-    if (profile?.role === 'customer') {
-      setError('This account is a customer, not a provider. Please use the customer login.')
+      if (wrongRole) setCorrectLoginPath(path || null)
       setLoading(false)
       return
     }
@@ -78,9 +67,29 @@ export default function ProviderLoginPage() {
           </div>
 
           {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-              <AlertCircle className="text-red-500 flex-shrink-0 mt-0.5" size={20} />
-              <p className="text-sm text-red-700">{error}</p>
+            <div className="mb-6 p-4 bg-red-50 border-2 border-red-200 rounded-xl flex items-start gap-3 shadow-sm">
+              <AlertCircle className="text-red-500 flex-shrink-0 mt-0.5" size={22} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-red-900 mb-1">Can't sign you in here</p>
+                <p className="text-sm text-red-700">{error}</p>
+                {correctLoginPath && (
+                  <Link
+                    to={correctLoginPath}
+                    className="mt-3 inline-flex items-center gap-1.5 bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+                  >
+                    Take me to the right login
+                    <ArrowRight size={14} />
+                  </Link>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => { setError(null); setCorrectLoginPath(null) }}
+                className="text-red-400 hover:text-red-600 flex-shrink-0"
+                aria-label="Dismiss"
+              >
+                <X size={18} />
+              </button>
             </div>
           )}
 

@@ -24,7 +24,15 @@ interface AuthContextType {
   session: Session | null
   loading: boolean
   signUp: (email: string, password: string, role: UserRole, data?: SignUpData) => Promise<{ error: Error | null }>
-  signIn: (email: string, password: string, expectedRole?: UserRole) => Promise<{ error: Error | null }>
+  signIn: (
+    email: string,
+    password: string,
+    expectedRole?: UserRole
+  ) => Promise<{
+    error: Error | null
+    wrongRole?: UserRole
+    correctLoginPath?: string
+  }>
   signOut: () => Promise<void>
   updateRole: (role: UserRole) => Promise<{ error: Error | null }>
 }
@@ -140,26 +148,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) throw error
 
-      let loggedInUser: AuthUser | null = null
-      if (data.user) {
-        loggedInUser = await fetchUserProfile(data.user.id)
+      // If the calling page specified which role this user should have
+      // (e.g. customer login page passes 'customer'), check the role BEFORE
+      // setting any state. This way the page doesn't re-render with a
+      // logged-in user state, and we can cleanly sign them out without
+      // the error message getting lost.
+      if (data.user && expectedRole) {
+        const { data: profile } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', data.user.id)
+          .single()
+
+        if (profile && profile.role !== expectedRole) {
+          // Wrong role — sign out before setting any state
+          await supabase.auth.signOut()
+          const wrongRole = profile.role
+          const wrongLabel = wrongRole === 'provider' ? 'lawn pro' : wrongRole === 'admin' ? 'admin' : 'customer'
+          const expectedLabel = expectedRole === 'provider' ? 'lawn pro' : expectedRole
+          return {
+            error: new Error(
+              `This is a ${wrongLabel} account, not a ${expectedLabel} account.`
+            ),
+            wrongRole,
+            correctLoginPath:
+              wrongRole === 'provider' ? '/login/pro' :
+              wrongRole === 'admin' ? '/admin/users' :
+              '/login/customer',
+          }
+        }
       }
 
-      // If the calling page specified which role this user should have
-      // (e.g. customer login page passes 'customer'), reject mismatches.
-      // Sign them out so they don't end up logged in with the wrong role.
-      if (expectedRole && loggedInUser && loggedInUser.role !== expectedRole) {
-        const wrongRole = loggedInUser.role
-        await supabase.auth.signOut()
-        setUser(null)
-        setSession(null)
-        const wrongLabel = wrongRole === 'provider' ? 'lawn pro' : wrongRole === 'admin' ? 'admin' : 'customer'
-        const expectedLabel = expectedRole === 'provider' ? 'lawn pro' : expectedRole
-        return {
-          error: new Error(
-            `This account is a ${wrongLabel} account, not a ${expectedLabel} account. Please use the ${wrongLabel} login instead.`
-          ),
-        }
+      // Role matches (or no expectedRole), proceed to set state
+      if (data.user) {
+        await fetchUserProfile(data.user.id)
       }
 
       return { error: null }
