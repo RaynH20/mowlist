@@ -61,6 +61,7 @@ function CheckoutForm() {
   // of relying on formData.
   const passedFormData = (location.state as any)?.formData
   const existingBookingId = searchParams.get('booking_id')
+  const isPayingExisting = !!existingBookingId
   const initialZip = passedFormData?.zipCode || searchParams.get('zip') || ''
   const serviceType = passedFormData?.serviceType || searchParams.get('service') || 'mowing'
   const lawnSize = passedFormData?.lawnSize || searchParams.get('size') || 'medium'
@@ -80,19 +81,12 @@ function CheckoutForm() {
   }
   const basePrice = servicePrices[lawnSize] || 45
   const serviceFee = 2.99
-  // If paying for an existing booking, use the booking's stored price (the
-  // customer already saw this number when they submitted the request).
-  // Otherwise calculate from the form.
-  const total = isPayingExisting && existingBooking
-    ? Number(existingBooking.estimated_price)
-    : basePrice + serviceFee
 
   // Generate booking ID. If we're paying for an existing booking (the
   // customer is coming back after a pro accepted), use that booking's id
   // instead of creating a new one.
   const [generatedBookingId] = useState(() => `bk_${crypto.randomUUID()}`)
   const bookingId = existingBookingId || generatedBookingId
-  const isPayingExisting = !!existingBookingId
 
   // Fetch the existing booking details so we can show them in the summary
   const [existingBooking, setExistingBooking] = useState<any | null>(null)
@@ -120,6 +114,13 @@ function CheckoutForm() {
       })
     return () => { cancelled = true }
   }, [existingBookingId, user])
+
+  // If paying for an existing booking, use the booking's stored price (the
+  // customer already saw this number when they submitted the request).
+  // Otherwise calculate from the form.
+  const total = isPayingExisting && existingBooking
+    ? Number(existingBooking.estimated_price)
+    : basePrice + serviceFee
 
   // Load saved payment methods
   useEffect(() => {
