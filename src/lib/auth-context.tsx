@@ -61,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  const fetchUserProfile = async (userId: string) => {
+  const fetchUserProfile = async (userId: string): Promise<AuthUser | null> => {
     try {
       const { data, error } = await supabase
         .from('users')
@@ -72,14 +72,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) throw error
 
       if (data) {
-        setUser({
+        const next = {
           id: data.id,
           email: data.email,
           role: data.role,
-        })
+        }
+        setUser(next)
+        return next
       }
+      return null
     } catch (error) {
       console.error('Error fetching user profile:', error)
+      return null
     } finally {
       setLoading(false)
     }
@@ -136,22 +140,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) throw error
 
+      let loggedInUser: AuthUser | null = null
       if (data.user) {
-        await fetchUserProfile(data.user.id)
+        loggedInUser = await fetchUserProfile(data.user.id)
       }
 
       // If the calling page specified which role this user should have
       // (e.g. customer login page passes 'customer'), reject mismatches.
       // Sign them out so they don't end up logged in with the wrong role.
-      if (expectedRole && user && user.role !== expectedRole) {
-        const wrongRole = user.role
+      if (expectedRole && loggedInUser && loggedInUser.role !== expectedRole) {
+        const wrongRole = loggedInUser.role
         await supabase.auth.signOut()
         setUser(null)
         setSession(null)
-        const label = wrongRole === 'provider' ? 'lawn pro' : wrongRole === 'admin' ? 'admin' : 'customer'
+        const wrongLabel = wrongRole === 'provider' ? 'lawn pro' : wrongRole === 'admin' ? 'admin' : 'customer'
+        const expectedLabel = expectedRole === 'provider' ? 'lawn pro' : expectedRole
         return {
           error: new Error(
-            `This account is a ${label} account, not a ${expectedRole === 'provider' ? 'lawn pro' : expectedRole} account. Please use the ${label} login instead.`
+            `This account is a ${wrongLabel} account, not a ${expectedLabel} account. Please use the ${wrongLabel} login instead.`
           ),
         }
       }
