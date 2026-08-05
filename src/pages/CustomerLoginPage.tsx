@@ -17,7 +17,7 @@ export default function CustomerLoginPage() {
     setError(null)
     setLoading(true)
 
-    const { error } = await signIn(email, password)
+    const { error } = await signIn(email, password, 'customer')
 
     if (error) {
       setError(error.message)

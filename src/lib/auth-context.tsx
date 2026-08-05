@@ -24,7 +24,7 @@ interface AuthContextType {
   session: Session | null
   loading: boolean
   signUp: (email: string, password: string, role: UserRole, data?: SignUpData) => Promise<{ error: Error | null }>
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>
+  signIn: (email: string, password: string, expectedRole?: UserRole) => Promise<{ error: Error | null }>
   signOut: () => Promise<void>
   updateRole: (role: UserRole) => Promise<{ error: Error | null }>
 }
@@ -127,7 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string, expectedRole?: UserRole) => {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -138,6 +138,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (data.user) {
         await fetchUserProfile(data.user.id)
+      }
+
+      // If the calling page specified which role this user should have
+      // (e.g. customer login page passes 'customer'), reject mismatches.
+      // Sign them out so they don't end up logged in with the wrong role.
+      if (expectedRole && user && user.role !== expectedRole) {
+        const wrongRole = user.role
+        await supabase.auth.signOut()
+        setUser(null)
+        setSession(null)
+        const label = wrongRole === 'provider' ? 'lawn pro' : wrongRole === 'admin' ? 'admin' : 'customer'
+        return {
+          error: new Error(
+            `This account is a ${label} account, not a ${expectedRole === 'provider' ? 'lawn pro' : expectedRole} account. Please use the ${label} login instead.`
+          ),
+        }
       }
 
       return { error: null }

@@ -17,7 +17,7 @@ export default function ProviderLoginPage() {
     setError(null)
     setLoading(true)
 
-    const { error } = await signIn(email, password)
+    const { error } = await signIn(email, password, 'provider')
 
     if (error) {
       setError(error.message || 'Invalid credentials')
