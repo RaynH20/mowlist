@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   User, Save, Loader2, CheckCircle, Camera, Phone, FileText,
-  MapPin, Briefcase, Plus, X, Award, Info, ChevronDown, Lock, Shield, Clock
+  MapPin, Briefcase, Plus, X, Award, Info, ChevronDown, Lock, Shield, Clock, ExternalLink
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { getProviderProfile, updateProviderProfile } from '../../lib/api'
@@ -566,9 +566,39 @@ function StripeConnectSection({
           )}
         </button>
       ) : (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700 flex items-center gap-2">
-          <CheckCircle size={16} />
-          <span>Ready to receive payouts. Earnings are sent weekly.</span>
+        <div className="space-y-3">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700 flex items-center gap-2">
+            <CheckCircle size={16} />
+            <span>Ready to receive payouts. Earnings are sent weekly.</span>
+          </div>
+          {/* "Manage on Stripe" button — takes the pro to their Express dashboard
+              so they can update bank info, business details, download tax forms, etc. */}
+          <button
+            onClick={async () => {
+              if (!user) return
+              try {
+                setLoading(true)
+                setError(null)
+                const { createStripeLoginLink } = await import('../../lib/stripeConnect')
+                const { url } = await createStripeLoginLink(user.id)
+                window.location.href = url
+              } catch (err: any) {
+                setError(err.message || 'Failed to open Stripe dashboard')
+                setLoading(false)
+              }
+            }}
+            disabled={loading}
+            className="w-full bg-white border-2 border-slate-200 text-slate-700 py-2.5 rounded-lg font-medium hover:border-slate-300 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+          >
+            {loading ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <>
+                <ExternalLink size={16} />
+                Manage payouts on Stripe
+              </>
+            )}
+          </button>
         </div>
       )}
 

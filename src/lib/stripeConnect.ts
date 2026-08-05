@@ -42,3 +42,9 @@ export async function startConnectOnboarding(
     return_url,
   })
 }
+
+// Create a one-time login link for the pro's Stripe Express dashboard so
+// they can update bank info, edit business details, or download tax forms.
+export async function createStripeLoginLink(user_id: string): Promise<{ url: string }> {
+  return callEdgeFunction<{ url: string }>('create-stripe-login-link', { user_id })
+}
