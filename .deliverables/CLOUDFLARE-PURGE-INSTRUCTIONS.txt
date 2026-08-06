@@ -1,0 +1,20 @@
+CLOUDFLARE CACHE PURGE — REQUIRED
+
+Your mowlist.com is on Cloudflare in front of Vercel. Cloudflare's CDN
+is serving a corrupted merged HTML (new content + old asset reference).
+The fix is to PURGE Cloudflare's cache.
+
+STEPS:
+1. Go to https://dash.cloudflare.com
+2. Click your site (mowlist.com) in the list
+3. In the left sidebar, click Caching → Configuration
+4. Click the orange "Purge Everything" button
+5. Confirm
+6. Hard refresh mowlist.com (Cmd+Shift+R)
+7. Look at the HTML: it should reference "index-CQkJS7zy.js" not "index-BWIR9luX.js"
+
+If you don't have Cloudflare access, the alternative is to wait
+~30 minutes for Cloudflare's cache to expire, but PURGE is faster.
+
+The new code IS on the server. The old HTML in Cloudflare's cache
+just needs to be invalidated.

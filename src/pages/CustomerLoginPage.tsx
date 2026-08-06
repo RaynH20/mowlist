@@ -19,7 +19,9 @@ export default function CustomerLoginPage() {
     setCorrectLoginPath(null)
     setLoading(true)
 
+    console.log('[CustomerLogin] calling signIn with role=customer')
     const { error, wrongRole, correctLoginPath: path } = await signIn(email, password, 'customer')
+    console.log('[CustomerLogin] signIn returned:', { error: error?.message, wrongRole, path })
 
     if (error) {
       setError(error.message)
