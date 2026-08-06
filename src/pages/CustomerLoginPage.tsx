@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, Shield, Scissors, AlertCircle, X, ArrowRight } from 'lucide-react'
 import { useAuth } from '../lib/auth-context'
@@ -7,39 +7,61 @@ export default function CustomerLoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [correctLoginPath, setCorrectLoginPath] = useState<string | null>(null)
+  const [error, setError] = useState<{ message: string; path: string | null } | null>(null)
   const [loading, setLoading] = useState(false)
+  const submittingRef = useRef(false)
+  const errorRef = useRef<{ message: string; path: string | null } | null>(null)
   const navigate = useNavigate()
   const { signIn } = useAuth()
 
-  // Debug: log state changes so we can see what's happening
+  // If state somehow gets reset but we have a stashed error, restore it.
+  // Defends against React re-renders, strict-mode double-invokes, etc.
   useEffect(() => {
-    console.log('[CustomerLogin] state changed. error:', error, 'path:', correctLoginPath, 'loading:', loading)
-    if (error) {
-      // Scroll to top so the toast is visible
+    if (error === null && errorRef.current !== null) {
+      console.log('[CustomerLogin] restoring error from ref')
+      setError(errorRef.current)
+    }
+  }, [error])
+
+  useEffect(() => {
+    if (error && errorRef.current) {
+      // Scroll to top so the toast is visible (once)
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
-  }, [error, correctLoginPath, loading])
+  }, [error?.message])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError(null)
-    setCorrectLoginPath(null)
+
+    // Guard against double-submit (in case the form fires twice)
+    if (submittingRef.current) {
+      console.log('[CustomerLogin] already submitting, ignoring')
+      return
+    }
+    submittingRef.current = true
+
     setLoading(true)
+    setError(null)
+    errorRef.current = null
 
     console.log('[CustomerLogin] calling signIn with role=customer')
-    const { error, wrongRole, correctLoginPath: path } = await signIn(email, password, 'customer')
-    console.log('[CustomerLogin] signIn returned:', { error: error?.message, wrongRole, path })
+    const { error: signInErr, wrongRole, correctLoginPath: path } = await signIn(email, password, 'customer')
+    console.log('[CustomerLogin] signIn returned:', { error: signInErr?.message, wrongRole, path })
 
-    if (error) {
-      console.log('[CustomerLogin] setting error state:', error.message)
-      setError(error.message)
-      if (wrongRole) setCorrectLoginPath(path || null)
-      setLoading(false)
+    if (signInErr) {
+      const next = {
+        message: signInErr.message,
+        path: wrongRole ? path || null : null,
+      }
+      console.log('[CustomerLogin] setting error state:', next)
+      errorRef.current = next
+      setError(next)
     } else {
       navigate('/dashboard')
     }
+
+    setLoading(false)
+    submittingRef.current = false
   }
 
   return (
@@ -60,10 +82,10 @@ export default function CustomerLoginPage() {
             <AlertCircle className="text-red-500 flex-shrink-0 mt-0.5" size={26} />
             <div className="flex-1 min-w-0">
               <p className="text-base font-bold text-red-900 mb-1">Can't sign you in here</p>
-              <p className="text-sm text-red-700">{error}</p>
-              {correctLoginPath && (
+              <p className="text-sm text-red-700">{error.message}</p>
+              {error.path && (
                 <Link
-                  to={correctLoginPath}
+                  to={error.path}
                   className="mt-3 inline-flex items-center gap-1.5 bg-red-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-red-700 transition-colors shadow-sm"
                 >
                   Take me to the right login
@@ -73,7 +95,7 @@ export default function CustomerLoginPage() {
             </div>
             <button
               type="button"
-              onClick={() => { setError(null); setCorrectLoginPath(null) }}
+              onClick={() => { errorRef.current = null; setError(null) }}
               className="text-red-400 hover:text-red-600 flex-shrink-0"
               aria-label="Dismiss"
             >
