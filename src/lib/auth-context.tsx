@@ -153,7 +153,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // setting any state. This way the page doesn't re-render with a
       // logged-in user state, and we can cleanly sign them out without
       // the error message getting lost.
-      console.log('[signIn] expectedRole:', expectedRole, 'data.user.id:', data.user?.id)
       if (data.user && expectedRole) {
         const { data: profile, error: profileErr } = await supabase
           .from('users')
@@ -161,7 +160,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .eq('id', data.user.id)
           .single()
 
-        console.log('[signIn] role check result:', { profile, profileErr })
 
         if (profile && profile.role !== expectedRole) {
           // Wrong role — sign out before setting any state
@@ -169,7 +167,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const wrongRole = profile.role
           const wrongLabel = wrongRole === 'provider' ? 'lawn pro' : wrongRole === 'admin' ? 'admin' : 'customer'
           const expectedLabel = expectedRole === 'provider' ? 'lawn pro' : expectedRole
-          console.log('[signIn] ROLE MISMATCH DETECTED. Signing out.')
           return {
             error: new Error(
               `This is a ${wrongLabel} account, not a ${expectedLabel} account.`

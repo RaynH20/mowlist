@@ -50,23 +50,19 @@ export default function CustomerLoginPage() {
 
     // Guard against double-submit (in case the form fires twice in same mount)
     if (submittingRef.current) {
-      console.log('[CustomerLogin] already submitting, ignoring')
       return
     }
     submittingRef.current = true
 
     setLoading(true)
 
-    console.log('[CustomerLogin] calling signIn with role=customer')
     const { error: signInErr, wrongRole, correctLoginPath: path } = await signIn(email, password, 'customer')
-    console.log('[CustomerLogin] signIn returned:', { error: signInErr?.message, wrongRole, path })
 
     if (signInErr) {
       const next = {
         message: signInErr.message,
         path: wrongRole ? path || null : null,
       }
-      console.log('[CustomerLogin] persisting error to sessionStorage:', next)
       writeError(next)
       sessionStorage.removeItem(DISMISSED_KEY)
       setError(next)
