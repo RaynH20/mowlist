@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   Search, MapPin, Star, Shield, Clock, CheckCircle, ArrowRight,
   Scissors, Calendar, Pause, CreditCard, Sparkles, Award,
-  Phone, MessageCircle, ChevronDown, TrendingUp
+  Phone, MessageCircle, ChevronDown, TrendingUp, BadgeCheck
 } from 'lucide-react'
 
 export default function HomePage() {
@@ -119,12 +119,16 @@ export default function HomePage() {
                 <span>average rating</span>
               </div>
               <div className="flex items-center gap-1.5">
+                <Award size={14} className="text-[#22C55E]" />
+                <span>Top-rated, background-checked pros</span>
+              </div>
+              <div className="flex items-center gap-1.5">
                 <Shield size={14} className="text-[#22C55E]" />
-                <span>100% vetted, insured pros</span>
+                <span>$2M property protection</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle size={14} className="text-[#22C55E]" />
-                <span>No commitment, cancel anytime</span>
+                <span>24hr Done Right guarantee</span>
               </div>
             </div>
           </div>
@@ -148,13 +152,48 @@ export default function HomePage() {
               { num: '2,500+', label: 'Lawns mowed' },
               { num: '500+', label: 'Vetted pros' },
               { num: '4.9 ★', label: 'Avg rating' },
-              { num: '24hr', label: 'Free re-mow guarantee' },
+              { num: '24hr', label: 'Done Right guarantee' },
             ].map((s, i) => (
               <div key={i} className="text-center">
                 <div className="text-3xl md:text-4xl font-bold text-[#22C55E] mb-1">{s.num}</div>
                 <div className="text-sm text-slate-400">{s.label}</div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ================================================================
+          DONE RIGHT GUARANTEE — prominent trust banner
+          ================================================================ */}
+      <section className="bg-gradient-to-r from-[#22C55E] to-[#16A34A] text-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-12">
+          <div className="grid md:grid-cols-3 gap-8 items-center">
+            <div className="md:col-span-2 flex items-start gap-4">
+              <div className="w-14 h-14 bg-white/20 backdrop-blur rounded-2xl flex items-center justify-center flex-shrink-0">
+                <Award size={28} />
+              </div>
+              <div>
+                <h2 className="text-2xl md:text-3xl font-bold mb-2">The MowList Done Right Guarantee</h2>
+                <p className="text-white/90 text-lg">
+                  Not happy with your mow? Tell us within 24 hours and we'll re-mow your lawn for free or refund you in full. No questions, no hassle.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 text-white/90">
+                <BadgeCheck size={18} className="flex-shrink-0" />
+                <span>Every pro background-checked</span>
+              </div>
+              <div className="flex items-center gap-2 text-white/90">
+                <Shield size={18} className="flex-shrink-0" />
+                <span>$2M property damage protection</span>
+              </div>
+              <div className="flex items-center gap-2 text-white/90">
+                <CheckCircle size={18} className="flex-shrink-0" />
+                <span>Before & after photos on every job</span>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -272,9 +311,9 @@ export default function HomePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {[
               {
-                icon: Shield,
-                title: 'Vetted Pros',
-                desc: 'Every pro is background-checked, identity-verified, and reviewed by customers after every job.',
+                icon: Award,
+                title: 'Top-Rated Pros',
+                desc: 'Every pro is background-checked, identity-verified through Stripe, and reviewed by customers after every job. Pros keep a public rating — anything below 4.5 stars is removed.',
               },
               {
                 icon: TrendingUp,

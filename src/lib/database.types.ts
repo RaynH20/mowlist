@@ -139,6 +139,15 @@ export interface Booking {
   payment_status: PaymentStatus
   booking_status: BookingStatus
   notes: string | null
+  before_photo_url: string | null
+  after_photo_url: string | null
+  before_photo_at: string | null
+  after_photo_at: string | null
+  pro_lat: number | null
+  pro_lng: number | null
+  tracking_started_at: string | null
+  tracking_ended_at: string | null
+  completed_at: string | null
   created_at: string
   updated_at: string
 }

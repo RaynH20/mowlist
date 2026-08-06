@@ -187,10 +187,60 @@ export async function getBookingById(bookingId: string): Promise<{ data: Booking
 
 export async function updateBookingStatus(bookingId: string, status: BookingStatus): Promise<{ data: Booking | null; error: Error | null }> {
   try {
-    // Update booking status
+    // If trying to mark complete, REQUIRE a before AND after photo
+    if (status === 'completed') {
+      const { data: existing, error: fetchError } = await supabase
+        .from('bookings')
+        .select('before_photo_url, after_photo_url')
+        .eq('id', bookingId)
+        .single()
+
+      if (fetchError) throw fetchError
+
+      if (!existing?.before_photo_url) {
+        return { data: null, error: new Error('Before photo is required to mark job complete. Please take a "before" photo first.') }
+      }
+      if (!existing?.after_photo_url) {
+        return { data: null, error: new Error('After photo is required to mark job complete. Please take an "after" photo to prove the work was done.') }
+      }
+    }
+
+    // If transitioning to in_progress and no before_photo_url, require it
+    if (status === 'in_progress') {
+      const { data: existing, error: fetchError } = await supabase
+        .from('bookings')
+        .select('before_photo_url')
+        .eq('id', bookingId)
+        .single()
+
+      if (fetchError) throw fetchError
+
+      if (!existing?.before_photo_url) {
+        return { data: null, error: new Error('Before photo is required to start the job. Please take a "before" photo first.') }
+      }
+    }
+
+    // Build the update payload
+    const updatePayload: Record<string, any> = {
+      booking_status: status,
+      updated_at: new Date().toISOString(),
+    }
+
+    // If starting the active service window, record when tracking started
+    if (status === 'on_the_way' && !updatePayload.tracking_started_at) {
+      updatePayload.tracking_started_at = new Date().toISOString()
+    }
+
+    // If completing, end tracking
+    if (status === 'completed') {
+      updatePayload.tracking_ended_at = new Date().toISOString()
+      // Also set the completed_at timestamp if it exists
+      updatePayload.completed_at = new Date().toISOString()
+    }
+
     const { data: booking, error } = await supabase
       .from('bookings')
-      .update({ booking_status: status, updated_at: new Date().toISOString() })
+      .update(updatePayload)
       .eq('id', bookingId)
       .select()
       .single()
@@ -204,6 +254,144 @@ export async function updateBookingStatus(bookingId: string, status: BookingStat
     })
 
     return { data: booking, error: null }
+  } catch (error) {
+    return { data: null, error: error as Error }
+  }
+}
+
+/**
+ * Upload a job photo (before / during / after / issue / completion) to Supabase Storage
+ * and link it to the booking. Updates the booking's before_photo_url or after_photo_url
+ * depending on the photo type.
+ */
+export async function uploadJobPhoto(
+  bookingId: string,
+  photoType: 'before' | 'during' | 'after' | 'issue' | 'completion',
+  file: File
+): Promise<{ data: { url: string } | null; error: Error | null }> {
+  try {
+    // Validate file
+    if (!file.type.startsWith('image/')) {
+      return { data: null, error: new Error('Please upload an image file') }
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      return { data: null, error: new Error('Image must be under 10MB') }
+    }
+
+    // Generate unique path: bookings/{bookingId}/{photoType}-{timestamp}.{ext}
+    const ext = file.name.split('.').pop() || 'jpg'
+    const path = `bookings/${bookingId}/${photoType}-${Date.now()}.${ext}`
+
+    // Upload to Supabase Storage
+    const { error: uploadError } = await supabase.storage
+      .from('job-photos')
+      .upload(path, file, { cacheControl: '3600', upsert: true })
+
+    if (uploadError) throw uploadError
+
+    // Get public URL
+    const { data: urlData } = supabase.storage.from('job-photos').getPublicUrl(path)
+    const url = urlData.publicUrl
+
+    // Update the booking column if it's a before/after photo
+    if (photoType === 'before') {
+      const { error: updateError } = await supabase
+        .from('bookings')
+        .update({
+          before_photo_url: url,
+          before_photo_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', bookingId)
+      if (updateError) throw updateError
+    } else if (photoType === 'after' || photoType === 'completion') {
+      const { error: updateError } = await supabase
+        .from('bookings')
+        .update({
+          after_photo_url: url,
+          after_photo_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', bookingId)
+      if (updateError) throw updateError
+    }
+
+    // Also insert into booking_photos table (for multi-photo tracking)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      await supabase.from('booking_photos').insert({
+        booking_id: bookingId,
+        photo_type: photoType,
+        photo_url: url,
+        uploaded_by: user.id,
+      })
+    }
+
+    return { data: { url }, error: null }
+  } catch (error) {
+    return { data: null, error: error as Error }
+  }
+}
+
+/**
+ * Pro sends a location ping during an active service. Used for live tracking.
+ * Only allowed when the booking is in on_the_way, arrived, or in_progress.
+ */
+export async function pingProLocation(
+  bookingId: string,
+  lat: number,
+  lng: number,
+  accuracyMeters?: number
+): Promise<{ data: any; error: Error | null }> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { data: null, error: new Error('Not signed in') }
+
+    const { data: provider } = await supabase
+      .from('provider_profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .single()
+
+    if (!provider) return { data: null, error: new Error('No provider profile') }
+
+    // Verify the booking is in an active state
+    const { data: booking, error: bErr } = await supabase
+      .from('bookings')
+      .select('booking_status, provider_id')
+      .eq('id', bookingId)
+      .single()
+
+    if (bErr) throw bErr
+    if (booking?.provider_id !== provider.id) {
+      return { data: null, error: new Error('Not your booking') }
+    }
+    if (!['on_the_way', 'arrived', 'in_progress'].includes(booking?.booking_status ?? '')) {
+      return { data: null, error: new Error('Tracking only allowed during active service') }
+    }
+
+    // Insert the ping
+    const { data, error } = await supabase.from('pro_location_pings').insert({
+      provider_id: provider.id,
+      booking_id: bookingId,
+      lat,
+      lng,
+      accuracy_meters: accuracyMeters ?? null,
+    })
+
+    if (error) throw error
+
+    // Also update last-known on the booking
+    await supabase
+      .from('bookings')
+      .update({
+        pro_lat: lat,
+        pro_lng: lng,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', bookingId)
+
+    return { data, error: null }
   } catch (error) {
     return { data: null, error: error as Error }
   }
