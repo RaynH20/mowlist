@@ -272,22 +272,36 @@ export async function uploadJobPhoto(
   try {
     // Validate file
     if (!file.type.startsWith('image/')) {
-      return { data: null, error: new Error('Please upload an image file') }
+      return { data: null, error: new Error('Please upload an image file (JPG, PNG, etc.)') }
     }
     if (file.size > 10 * 1024 * 1024) {
       return { data: null, error: new Error('Image must be under 10MB') }
     }
 
     // Generate unique path: bookings/{bookingId}/{photoType}-{timestamp}.{ext}
-    const ext = file.name.split('.').pop() || 'jpg'
-    const path = `bookings/${bookingId}/${photoType}-${Date.now()}.${ext}`
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'heic'].includes(ext) ? ext : 'jpg'
+    const path = `bookings/${bookingId}/${photoType}-${Date.now()}.${safeExt}`
 
     // Upload to Supabase Storage
     const { error: uploadError } = await supabase.storage
       .from('job-photos')
       .upload(path, file, { cacheControl: '3600', upsert: true })
 
-    if (uploadError) throw uploadError
+    if (uploadError) {
+      // Detect "bucket not found" and give a useful message
+      if (uploadError.message?.toLowerCase().includes('bucket') ||
+          uploadError.message?.toLowerCase().includes('not found') ||
+          (uploadError as any).statusCode === '404') {
+        return {
+          data: null,
+          error: new Error(
+            'Photo storage is not set up yet. Please run the migration: supabase/migrations/2026-08-06_job_photos.sql in your Supabase SQL editor to create the job-photos bucket.'
+          ),
+        }
+      }
+      throw uploadError
+    }
 
     // Get public URL
     const { data: urlData } = supabase.storage.from('job-photos').getPublicUrl(path)
@@ -319,16 +333,19 @@ export async function uploadJobPhoto(
     // Also insert into booking_photos table (for multi-photo tracking)
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
+      // Don't fail the whole upload if this insert fails (table may not exist yet)
       await supabase.from('booking_photos').insert({
         booking_id: bookingId,
         photo_type: photoType,
         photo_url: url,
         uploaded_by: user.id,
+      }).then(({ error: insErr }) => {
+        if (insErr) console.warn('Could not insert into booking_photos (table may not exist):', insErr.message)
       })
     }
 
     return { data: { url }, error: null }
-  } catch (error) {
+  } catch (error: any) {
     return { data: null, error: error as Error }
   }
 }
@@ -336,6 +353,7 @@ export async function uploadJobPhoto(
 /**
  * Pro sends a location ping during an active service. Used for live tracking.
  * Only allowed when the booking is in on_the_way, arrived, or in_progress.
+ * Silently no-ops if the migration hasn't been run yet.
  */
 export async function pingProLocation(
   bookingId: string,
@@ -370,7 +388,7 @@ export async function pingProLocation(
       return { data: null, error: new Error('Tracking only allowed during active service') }
     }
 
-    // Insert the ping
+    // Insert the ping (silently fail if table doesn't exist yet)
     const { data, error } = await supabase.from('pro_location_pings').insert({
       provider_id: provider.id,
       booking_id: bookingId,
@@ -379,7 +397,23 @@ export async function pingProLocation(
       accuracy_meters: accuracyMeters ?? null,
     })
 
-    if (error) throw error
+    if (error) {
+      // If table doesn't exist (42P01), silently fail - migration not run yet
+      if (error.code === '42P01' || error.code === 'PGRST205') {
+        console.warn('pro_location_pings table not found — run migration to enable live tracking')
+        // Still update the booking's last-known position
+        await supabase
+          .from('bookings')
+          .update({
+            pro_lat: lat,
+            pro_lng: lng,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', bookingId)
+        return { data: null, error: null }
+      }
+      throw error
+    }
 
     // Also update last-known on the booking
     await supabase

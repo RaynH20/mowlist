@@ -1,6 +1,7 @@
 import { CheckCircle, Clock, Truck, MapPin, Scissors, Award, XCircle, AlertCircle, Camera, MapPinned } from 'lucide-react'
 import type { BookingStatus, Address } from '../lib/database.types'
 import LiveTrackingMap from './LiveTrackingMap'
+import ErrorBoundary from './ErrorBoundary'
 
 interface StatusStep {
   id: BookingStatus
@@ -211,20 +212,23 @@ export default function BookingStatusTracker({
         </div>
       )}
 
-      {/* Live tracking map — only when booking is in an active state */}
+      {/* Live tracking map — only when booking is in an active state.
+          Wrapped in ErrorBoundary so a map issue never crashes the page. */}
       {hasActiveTracking && bookingId && (
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-6">
           <div className="flex items-center gap-2 mb-3">
             <MapPinned className="text-blue-600" size={20} />
             <h3 className="font-semibold text-slate-900">Your pro is on the way</h3>
           </div>
-          <LiveTrackingMap
-            bookingId={bookingId}
-            address={address ?? null}
-            initialProLat={proLat}
-            initialProLng={proLng}
-            active={['on_the_way', 'arrived', 'in_progress'].includes(status)}
-          />
+          <ErrorBoundary name="LiveTrackingMap">
+            <LiveTrackingMap
+              bookingId={bookingId}
+              address={address ?? null}
+              initialProLat={proLat}
+              initialProLng={proLng}
+              active={['on_the_way', 'arrived', 'in_progress'].includes(status)}
+            />
+          </ErrorBoundary>
           <p className="text-xs text-slate-500 mt-3">
             🔒 Your pro's location is only visible while the job is active. Tracking automatically ends when the job is marked complete. We never track outside of an active booking.
           </p>

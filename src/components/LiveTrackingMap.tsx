@@ -60,10 +60,12 @@ export default function LiveTrackingMap({
           .eq('booking_id', bookingId)
           .order('recorded_at', { ascending: false })
           .limit(1)
-          .single()
+          .maybeSingle()
 
-        if (fetchErr && fetchErr.code !== 'PGRST116') {
-          // PGRST116 = no rows (no pings yet — that's ok)
+        // PGRST116 = no rows (no pings yet — that's ok)
+        // 404 / 42P01 = table doesn't exist (migration not run yet — also ok, just no map)
+        const ignorableCodes = ['PGRST116', '42P01', 'PGRST205']
+        if (fetchErr && !ignorableCodes.includes(fetchErr.code)) {
           throw fetchErr
         }
 
@@ -75,7 +77,8 @@ export default function LiveTrackingMap({
           })
         }
       } catch (err: any) {
-        setError(err.message || 'Could not load location')
+        // Silently fail — don't break the parent component
+        console.warn('LiveTrackingMap: could not load location', err?.message)
       }
     }
 

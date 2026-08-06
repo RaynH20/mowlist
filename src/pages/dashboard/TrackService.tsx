@@ -9,6 +9,7 @@ import { useAuth } from '../../lib/auth-context'
 import { getCustomerBookings, getUserAddresses } from '../../lib/api'
 import type { Booking, Address } from '../../lib/database.types'
 import BookingStatusTracker from '../../components/BookingStatusTracker'
+import ErrorBoundary from '../../components/ErrorBoundary'
 
 const YARD_SIZE_LABELS: Record<string, string> = {
   small: 'Small Yard',
@@ -360,24 +361,27 @@ export default function TrackService() {
           </div>
         </div>
 
-        {/* Timeline - using the new status tracker with photo gallery + live tracking */}
+        {/* Timeline - using the new status tracker with photo gallery + live tracking.
+            Wrapped in ErrorBoundary so a broken map never crashes the page. */}
         <div>
           <div className="flex items-center gap-2 mb-3">
             <Clock size={14} className="text-[#22C55E]" />
             <h4 className="text-sm font-semibold text-slate-900">Service Progress</h4>
           </div>
-          <BookingStatusTracker
-            status={booking.booking_status}
-            scheduledDate={booking.scheduled_date}
-            scheduledTimeWindow={booking.scheduled_time_window}
-            beforePhotoUrl={booking.before_photo_url}
-            afterPhotoUrl={booking.after_photo_url}
-            hasActiveTracking={['on_the_way', 'arrived', 'in_progress'].includes(booking.booking_status)}
-            bookingId={booking.id}
-            address={bookingAddress}
-            proLat={booking.pro_lat}
-            proLng={booking.pro_lng}
-          />
+          <ErrorBoundary name={`Tracker-${booking.id}`}>
+            <BookingStatusTracker
+              status={booking.booking_status}
+              scheduledDate={booking.scheduled_date}
+              scheduledTimeWindow={booking.scheduled_time_window}
+              beforePhotoUrl={booking.before_photo_url}
+              afterPhotoUrl={booking.after_photo_url}
+              hasActiveTracking={['on_the_way', 'arrived', 'in_progress'].includes(booking.booking_status)}
+              bookingId={booking.id}
+              address={bookingAddress}
+              proLat={booking.pro_lat}
+              proLng={booking.pro_lng}
+            />
+          </ErrorBoundary>
         </div>
 
         {/* Action buttons */}

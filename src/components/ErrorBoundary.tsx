@@ -1,35 +1,56 @@
-import React from 'react';
+import { Component, ErrorInfo, ReactNode } from 'react'
+import { AlertCircle } from 'lucide-react'
 
-const searilizeError = (error: any) => {
-  if (error instanceof Error) {
-    return error.message + '\n' + error.stack;
+interface Props {
+  children: ReactNode
+  /** Optional fallback to render on error. Defaults to inline error. */
+  fallback?: ReactNode
+  /** Component name for debugging */
+  name?: string
+}
+
+interface State {
+  hasError: boolean
+  error?: Error
+}
+
+/**
+ * A defensive error boundary that catches errors in child components
+ * (e.g. map libraries, third-party widgets) so a single broken component
+ * doesn't crash the entire page.
+ */
+export class ErrorBoundary extends Component<Props, State> {
+  constructor(props: Props) {
+    super(props)
+    this.state = { hasError: false }
   }
-  return JSON.stringify(error, null, 2);
-};
 
-export class ErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { hasError: boolean; error: any }
-> {
-  constructor(props: { children: React.ReactNode }) {
-    super(props);
-    this.state = { hasError: false, error: null };
+  static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, error }
   }
 
-  static getDerivedStateFromError(error: any) {
-    return { hasError: true, error };
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    // Log to console for debugging — never crash the parent
+    console.warn(`ErrorBoundary${this.props.name ? ` (${this.props.name})` : ''} caught:`, error, info)
   }
 
   render() {
     if (this.state.hasError) {
+      if (this.props.fallback) return this.props.fallback
       return (
-        <div className="p-4 border border-red-500 rounded">
-          <h2 className="text-red-500">Something went wrong.</h2>
-          <pre className="mt-2 text-sm">{searilizeError(this.state.error)}</pre>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2 text-sm">
+          <AlertCircle className="text-amber-600 flex-shrink-0 mt-0.5" size={16} />
+          <div>
+            <p className="font-medium text-amber-900">Live tracking unavailable</p>
+            <p className="text-amber-700 text-xs mt-0.5">
+              We couldn't load this section right now. The rest of the page still works.
+            </p>
+          </div>
         </div>
-      );
+      )
     }
-
-    return this.props.children;
+    return this.props.children
   }
 }
+
+export default ErrorBoundary
