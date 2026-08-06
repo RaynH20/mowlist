@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, Shield, Scissors, AlertCircle, X, ArrowRight } from 'lucide-react'
 import { useAuth } from '../lib/auth-context'
@@ -13,6 +13,15 @@ export default function CustomerLoginPage() {
   const navigate = useNavigate()
   const { signIn } = useAuth()
 
+  // Debug: log state changes so we can see what's happening
+  useEffect(() => {
+    console.log('[CustomerLogin] state changed. error:', error, 'path:', correctLoginPath, 'loading:', loading)
+    if (error) {
+      // Scroll to top so the toast is visible
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }, [error, correctLoginPath, loading])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -24,6 +33,7 @@ export default function CustomerLoginPage() {
     console.log('[CustomerLogin] signIn returned:', { error: error?.message, wrongRole, path })
 
     if (error) {
+      console.log('[CustomerLogin] setting error state:', error.message)
       setError(error.message)
       if (wrongRole) setCorrectLoginPath(path || null)
       setLoading(false)
@@ -41,6 +51,37 @@ export default function CustomerLoginPage() {
       </div>
 
       <div className="max-w-md mx-auto px-4 sm:px-6 lg:px-8 relative">
+        {/* ERROR TOAST — fixed at top of page so it can't be missed */}
+        {error && (
+          <div
+            data-testid="login-error-toast"
+            className="mb-6 p-5 bg-red-50 border-2 border-red-300 rounded-2xl flex items-start gap-3 shadow-lg ring-4 ring-red-100"
+          >
+            <AlertCircle className="text-red-500 flex-shrink-0 mt-0.5" size={26} />
+            <div className="flex-1 min-w-0">
+              <p className="text-base font-bold text-red-900 mb-1">Can't sign you in here</p>
+              <p className="text-sm text-red-700">{error}</p>
+              {correctLoginPath && (
+                <Link
+                  to={correctLoginPath}
+                  className="mt-3 inline-flex items-center gap-1.5 bg-red-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-red-700 transition-colors shadow-sm"
+                >
+                  Take me to the right login
+                  <ArrowRight size={14} />
+                </Link>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => { setError(null); setCorrectLoginPath(null) }}
+              className="text-red-400 hover:text-red-600 flex-shrink-0"
+              aria-label="Dismiss"
+            >
+              <X size={20} />
+            </button>
+          </div>
+        )}
+
         <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
           {/* Role Badge */}
           <div className="text-center mb-6">
@@ -61,33 +102,6 @@ export default function CustomerLoginPage() {
             <h1 className="text-2xl font-bold text-slate-900 mt-6 mb-2">Welcome Back</h1>
             <p className="text-slate-600">Sign in to manage your lawn care</p>
           </div>
-
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border-2 border-red-200 rounded-xl flex items-start gap-3 shadow-sm">
-              <AlertCircle className="text-red-500 flex-shrink-0 mt-0.5" size={22} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-red-900 mb-1">Can't sign you in here</p>
-                <p className="text-sm text-red-700">{error}</p>
-                {correctLoginPath && (
-                  <Link
-                    to={correctLoginPath}
-                    className="mt-3 inline-flex items-center gap-1.5 bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
-                  >
-                    Take me to the right login
-                    <ArrowRight size={14} />
-                  </Link>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => { setError(null); setCorrectLoginPath(null) }}
-                className="text-red-400 hover:text-red-600 flex-shrink-0"
-                aria-label="Dismiss"
-              >
-                <X size={18} />
-              </button>
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
