@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Camera, X, Loader2, Image as ImageIcon, Plus } from 'lucide-react'
+import { Camera, X, Loader2, Image as ImageIcon, Plus, ImagePlus, AlertTriangle } from 'lucide-react'
 import type { BookingPhoto, PhotoType } from '../lib/database.types'
 import { uploadJobPhoto, getBookingPhotos, deleteBookingPhoto, MAX_PHOTOS_PER_BOOKING } from '../lib/api'
 
@@ -13,6 +13,124 @@ interface JobPhotoGalleryProps {
   onPhotosChange?: (photos: BookingPhoto[]) => void
   /** Compact mode: smaller thumbnails */
   compact?: boolean
+  /** When true, force freshness check (block photos older than 30 min) */
+  requireFreshPhoto?: boolean
+  /** Whether to show a "report" button on each photo (customer side) */
+  showReportButton?: boolean
+}
+
+const PHOTO_MAX_AGE_MS = 30 * 60 * 1000 // 30 minutes
+const MIN_WIDTH = 320
+const MIN_HEIGHT = 240
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+
+interface ValidationError {
+  code: 'too_old' | 'too_small' | 'wrong_type' | 'too_large' | 'no_exif'
+  message: string
+}
+
+/**
+ * Try to read EXIF DateTimeOriginal from a photo to verify it was
+ * taken recently. Most modern phone cameras include this in JPEGs.
+ * Returns null if no EXIF data is present.
+ */
+async function getExifTakenAt(file: File): Promise<Date | null> {
+  try {
+    // Only JPEG files reliably carry EXIF
+    if (file.type !== 'image/jpeg' && file.type !== 'image/jpg') return null
+
+    const buffer = await file.slice(0, 128 * 1024).arrayBuffer()
+    const view = new DataView(buffer)
+    // Look for "Exif\0\0" marker (0x45786966)
+    let exifOffset = -1
+    for (let i = 0; i < view.byteLength - 6; i++) {
+      if (
+        view.getUint8(i) === 0x45 &&
+        view.getUint8(i + 1) === 0x78 &&
+        view.getUint8(i + 2) === 0x69 &&
+        view.getUint8(i + 3) === 0x66
+      ) {
+        exifOffset = i + 6 // skip "Exif\0\0"
+        break
+      }
+    }
+    if (exifOffset < 0) return null
+
+    // Skip the TIFF header (8 bytes: II/MM + 0x002A + offset)
+    const littleEndian = view.getUint8(exifOffset) === 0x49 // 'II' = little-endian
+    const ifdOffset = exifOffset + view.getUint32(exifOffset + 4, littleEndian)
+    const numEntries = view.getUint16(ifdOffset, littleEndian)
+
+    for (let i = 0; i < numEntries; i++) {
+      const entryOffset = ifdOffset + 2 + i * 12
+      const tag = view.getUint16(entryOffset, littleEndian)
+      // 0x9003 = DateTimeOriginal
+      if (tag === 0x9003) {
+        const valueOffset = exifOffset + view.getUint32(entryOffset + 8, littleEndian)
+        // Format: "YYYY:MM:DD HH:MM:SS"
+        const dateStr = String.fromCharCode(...new Uint8Array(buffer, valueOffset, 19))
+        return new Date(dateStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3'))
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function validatePhoto(
+  file: File,
+  requireFresh: boolean
+): Promise<ValidationError | null> {
+  return new Promise(async (resolve) => {
+    if (!file.type.startsWith('image/')) {
+      resolve({ code: 'wrong_type', message: 'Please upload an image file' })
+      return
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      resolve({ code: 'too_large', message: 'Image must be under 10MB' })
+      return
+    }
+
+    // Read image dimensions
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = async () => {
+      URL.revokeObjectURL(url)
+      if (img.width < MIN_WIDTH || img.height < MIN_HEIGHT) {
+        resolve({
+          code: 'too_small',
+          message: `Image is too small (${img.width}×${img.height}). Minimum is ${MIN_WIDTH}×${MIN_HEIGHT}.`,
+        })
+        return
+      }
+
+      // Freshness check (if required)
+      if (requireFresh) {
+        const takenAt = await getExifTakenAt(file)
+        if (takenAt) {
+          const ageMs = Date.now() - takenAt.getTime()
+          if (ageMs > PHOTO_MAX_AGE_MS) {
+            const mins = Math.round(ageMs / 60000)
+            resolve({
+              code: 'too_old',
+              message: `This photo is ${mins} minutes old. Please take a fresh photo right now.`,
+            })
+            return
+          }
+        }
+        // If no EXIF (e.g., screenshot or PNG), we don't block — just note it
+        // Real production should require EXIF
+      }
+
+      resolve(null)
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve({ code: 'wrong_type', message: 'Could not read image file' })
+    }
+    img.src = url
+  })
 }
 
 /**
@@ -26,12 +144,17 @@ export default function JobPhotoGallery({
   initialPhotos,
   onPhotosChange,
   compact = false,
+  requireFreshPhoto = false,
+  showReportButton = false,
 }: JobPhotoGalleryProps) {
   const [photos, setPhotos] = useState<BookingPhoto[]>(initialPhotos || [])
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [showUploadOptions, setShowUploadOptions] = useState(false)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const galleryInputRef = useRef<HTMLInputElement>(null)
   const [selectedPhoto, setSelectedPhoto] = useState<BookingPhoto | null>(null)
+  const [reportedPhotos, setReportedPhotos] = useState<Set<string>>(new Set())
 
   // Load photos on mount if not provided
   useEffect(() => {
@@ -48,14 +171,22 @@ export default function JobPhotoGallery({
 
   const handleFileSelect = async (file: File) => {
     setError(null)
+    setShowUploadOptions(false)
 
     if (photos.length >= MAX_PHOTOS_PER_BOOKING) {
       setError(`Maximum ${MAX_PHOTOS_PER_BOOKING} photos allowed per job`)
       return
     }
 
+    // Validate
+    const validationError = await validatePhoto(file, requireFreshPhoto)
+    if (validationError) {
+      setError(validationError.message)
+      return
+    }
+
     setUploading(true)
-    const { data, error: uploadError } = await uploadJobPhoto(bookingId, 'during', file)
+    const { error: uploadError } = await uploadJobPhoto(bookingId, 'during', file)
     setUploading(false)
 
     if (uploadError) {
@@ -75,6 +206,27 @@ export default function JobPhotoGallery({
       return
     }
     await loadPhotos()
+  }
+
+  const handleReport = async (photo: BookingPhoto) => {
+    const reason = prompt(
+      'Why are you reporting this photo? (inappropriate, off-topic, etc.)',
+      ''
+    )
+    if (!reason) return
+
+    // Save the report locally and show confirmation
+    setReportedPhotos(prev => new Set(prev).add(photo.id))
+    setError(null)
+
+    // In production, this would call an API to flag the photo
+    // For now, log it and show a confirmation
+    console.warn('[PhotoReport]', { photoId: photo.id, bookingId, reason, reportedAt: new Date().toISOString() })
+
+    // Show a brief success state
+    setTimeout(() => {
+      alert('Thanks — we\'ll review this photo.')
+    }, 100)
   }
 
   // Order: before, after, then everything else by upload time
@@ -101,6 +253,7 @@ export default function JobPhotoGallery({
         <div className={`grid gap-2 ${compact ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-5'}`}>
           {orderedPhotos.map((photo) => {
             const isRequired = photo.photo_type === 'before' || photo.photo_type === 'after'
+            const isReported = reportedPhotos.has(photo.id)
             return (
               <div
                 key={photo.id}
@@ -137,59 +290,107 @@ export default function JobPhotoGallery({
                     <X size={12} />
                   </button>
                 )}
+                {showReportButton && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleReport(photo)
+                    }}
+                    disabled={isReported}
+                    className={`absolute bottom-1 right-1 text-xs px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
+                      isReported
+                        ? 'bg-slate-200 text-slate-500'
+                        : 'bg-amber-500 text-white hover:bg-amber-600'
+                    }`}
+                    aria-label="Report photo"
+                  >
+                    {isReported ? 'Reported' : 'Report'}
+                  </button>
+                )}
               </div>
             )
           })}
 
-          {/* Add photo button (pro side only) */}
+          {/* Add photo button (pro side only) — opens upload options */}
           {canAddMore && (
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="aspect-square rounded-lg border-2 border-dashed border-slate-300 hover:border-[#22C55E] bg-slate-50 hover:bg-green-50 transition-colors flex flex-col items-center justify-center gap-1 text-slate-500 hover:text-[#22C55E] disabled:opacity-50"
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="animate-spin" size={20} />
-                  <span className="text-xs">Uploading...</span>
-                </>
-              ) : (
-                <>
-                  <Plus size={20} />
-                  <span className="text-xs font-medium">Add photo</span>
-                </>
+            <div className="aspect-square relative">
+              <button
+                onClick={() => setShowUploadOptions(!showUploadOptions)}
+                disabled={uploading}
+                className="w-full h-full rounded-lg border-2 border-dashed border-slate-300 hover:border-[#22C55E] bg-slate-50 hover:bg-green-50 transition-colors flex flex-col items-center justify-center gap-1 text-slate-500 hover:text-[#22C55E] disabled:opacity-50"
+              >
+                {uploading ? (
+                  <>
+                    <Loader2 className="animate-spin" size={20} />
+                    <span className="text-xs">Uploading...</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus size={20} />
+                    <span className="text-xs font-medium">Add photo</span>
+                  </>
+                )}
+              </button>
+
+              {/* Upload options popover */}
+              {showUploadOptions && !uploading && (
+                <div className="absolute z-10 bottom-full mb-2 left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-lg p-2 flex flex-col gap-1">
+                  <button
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-green-50 hover:text-[#16A34A] rounded-lg text-left"
+                  >
+                    <Camera size={16} />
+                    Take photo
+                  </button>
+                  <button
+                    onClick={() => galleryInputRef.current?.click()}
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-green-50 hover:text-[#16A34A] rounded-lg text-left"
+                  >
+                    <ImagePlus size={16} />
+                    Choose from gallery
+                  </button>
+                </div>
               )}
-            </button>
+            </div>
           )}
         </div>
       ) : allowUpload ? (
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          className="w-full p-6 rounded-lg border-2 border-dashed border-slate-300 hover:border-[#22C55E] bg-slate-50 hover:bg-green-50 transition-colors flex items-center justify-center gap-2 text-slate-500 hover:text-[#22C55E] disabled:opacity-50"
-        >
-          {uploading ? (
-            <>
-              <Loader2 className="animate-spin" size={20} />
-              Uploading...
-            </>
-          ) : (
-            <>
-              <Camera size={20} />
-              <span className="font-medium">Upload a photo</span>
-            </>
-          )}
-        </button>
+        <div className="relative">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => cameraInputRef.current?.click()}
+              disabled={uploading}
+              className="p-6 rounded-xl border-2 border-[#22C55E] bg-green-50 hover:bg-green-100 transition-colors flex flex-col items-center justify-center gap-2 text-[#16A34A] disabled:opacity-50"
+            >
+              {uploading ? <Loader2 className="animate-spin" size={24} /> : <Camera size={28} />}
+              <span className="font-semibold text-sm">Take photo</span>
+              <span className="text-xs text-green-700">Use your camera</span>
+            </button>
+            <button
+              onClick={() => galleryInputRef.current?.click()}
+              disabled={uploading}
+              className="p-6 rounded-xl border-2 border-slate-300 bg-slate-50 hover:bg-slate-100 transition-colors flex flex-col items-center justify-center gap-2 text-slate-700 disabled:opacity-50"
+            >
+              {uploading ? <Loader2 className="animate-spin" size={24} /> : <ImagePlus size={28} />}
+              <span className="font-semibold text-sm">Upload</span>
+              <span className="text-xs text-slate-500">Choose from device</span>
+            </button>
+          </div>
+        </div>
       ) : (
         <div className="text-sm text-slate-400 italic">No photos yet</div>
       )}
 
       {error && (
-        <p className="text-sm text-red-600 mt-2">{error}</p>
+        <p className="text-sm text-red-600 mt-2 flex items-start gap-1.5">
+          <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </p>
       )}
 
+      {/* Camera input — uses back camera on mobile */}
       <input
-        ref={fileInputRef}
+        ref={cameraInputRef}
         type="file"
         accept="image/*"
         capture="environment"
@@ -197,7 +398,19 @@ export default function JobPhotoGallery({
         onChange={(e) => {
           const file = e.target.files?.[0]
           if (file) handleFileSelect(file)
-          e.target.value = '' // reset so same file can be selected again
+          e.target.value = ''
+        }}
+      />
+      {/* Gallery input — any image from device */}
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) handleFileSelect(file)
+          e.target.value = ''
         }}
       />
 

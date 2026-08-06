@@ -187,22 +187,36 @@ export default function BookingStatusTracker({
       )}
 
       {/* Live tracking map — only when booking is in an active state.
-          Wrapped in ErrorBoundary so a map issue never crashes the page. */}
+          Wrapped in ErrorBoundary so a map issue never crashes the page.
+          Only renders the map if we have pro coords or customer coords —
+          otherwise shows a simple status banner. */}
       {hasActiveTracking && bookingId && (
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-6">
           <div className="flex items-center gap-2 mb-3">
             <MapPinned className="text-blue-600" size={20} />
             <h3 className="font-semibold text-slate-900">Your pro is on the way</h3>
           </div>
-          <ErrorBoundary name="LiveTrackingMap">
-            <LiveTrackingMap
-              bookingId={bookingId}
-              address={address ?? null}
-              initialProLat={proLat}
-              initialProLng={proLng}
-              active={['on_the_way', 'arrived', 'in_progress'].includes(status)}
-            />
-          </ErrorBoundary>
+          {(proLat != null && proLng != null) || (address && (address as any).lat && (address as any).lng) ? (
+            <ErrorBoundary name="LiveTrackingMap">
+              <LiveTrackingMap
+                bookingId={bookingId}
+                address={address ?? null}
+                initialProLat={proLat}
+                initialProLng={proLng}
+                active={['on_the_way', 'arrived', 'in_progress'].includes(status)}
+              />
+            </ErrorBoundary>
+          ) : (
+            <div className="bg-white rounded-xl border border-blue-100 p-4 flex items-start gap-3">
+              <div className="w-2 h-2 bg-[#22C55E] rounded-full animate-pulse mt-2 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-slate-900">Your pro is heading to you</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Live map tracking will appear here as soon as your pro's location is available.
+                </p>
+              </div>
+            </div>
+          )}
           <p className="text-xs text-slate-500 mt-3">
             🔒 Your pro's location is only visible while the job is active. Tracking automatically ends when the job is marked complete. We never track outside of an active booking.
           </p>

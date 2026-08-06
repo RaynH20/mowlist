@@ -918,3 +918,21 @@ export async function deleteBookingPhoto(photoId: string): Promise<{ error: Erro
     return { error: error as Error }
   }
 }
+
+/**
+ * Get all payments for a customer, sorted newest first.
+ */
+export async function getCustomerPayments(customerId: string): Promise<{ data: Payment[]; error: Error | null }> {
+  try {
+    const { data, error } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+    return { data: (data || []) as Payment[], error: null }
+  } catch (error) {
+    return { data: [], error: error as Error }
+  }
+}

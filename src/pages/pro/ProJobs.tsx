@@ -290,30 +290,65 @@ export default function ProJobs() {
         </div>
       )}
 
-      {/* Recently Completed */}
+      {/* Recently Completed — clickable to open detail view */}
       {completedAssigned.length > 0 && (
         <div className="mb-8">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Recently Completed</h2>
           <div className="space-y-2">
             {completedAssigned.slice(0, 5).map((job) => (
-              <div
+              <button
                 key={job.id}
-                className="bg-white rounded-xl p-3 border border-slate-100 flex items-center justify-between"
+                onClick={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
+                className="w-full text-left bg-white rounded-xl p-3 border border-slate-100 hover:border-[#22C55E] hover:shadow-sm transition-all"
               >
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-slate-900">{job.customer_name || 'Customer'}</p>
-                  <p className="text-xs text-slate-500">{formatAddress(job)}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {formatDate(job.scheduled_date)} {job.scheduled_time_window || ''}
-                  </p>
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-slate-900">{job.customer_name || 'Customer'}</p>
+                    <p className="text-xs text-slate-500">{formatAddress(job)}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {formatDate(job.scheduled_date)} {job.scheduled_time_window || ''}
+                    </p>
+                  </div>
+                  <div className="text-right flex items-center gap-2">
+                    <div>
+                      <p className="text-sm font-bold text-[#22C55E]">
+                        +${(job.provider_payout_amount || 0).toFixed(2)}
+                      </p>
+                      <p className="text-xs text-slate-400">earned</p>
+                    </div>
+                    {expandedJob === job.id ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-[#22C55E]">
-                    +${(job.provider_payout_amount || 0).toFixed(2)}
-                  </p>
-                  <p className="text-xs text-slate-400">earned</p>
-                </div>
-              </div>
+
+                {expandedJob === job.id && (
+                  <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
+                    <div className="grid grid-cols-3 gap-2 text-sm">
+                      <div>
+                        <p className="text-xs text-slate-500">Service</p>
+                        <p className="font-medium text-slate-900">{serviceTypeLabel(job.service_type)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Frequency</p>
+                        <p className="font-medium text-slate-900 capitalize">{job.service_frequency.replace('_', '-')}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Payout</p>
+                        <p className="font-medium text-[#22C55E]">${(job.provider_payout_amount || 0).toFixed(2)}</p>
+                      </div>
+                    </div>
+
+                    {/* Photos for this completed job */}
+                    <div>
+                      <p className="text-xs text-slate-500 mb-2">Photos you uploaded</p>
+                      <JobPhotoGallery
+                        bookingId={job.id}
+                        allowUpload={false}
+                        compact
+                      />
+                    </div>
+                  </div>
+                )}
+              </button>
             ))}
           </div>
         </div>
