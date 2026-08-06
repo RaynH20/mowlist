@@ -3,29 +3,44 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, Shield, Scissors, AlertCircle, X, ArrowRight } from 'lucide-react'
 import { useAuth } from '../lib/auth-context'
 
+// sessionStorage key for the error so it survives component remounts.
+// (The Sign In button is being clicked 3+ times in rapid succession, which
+// appears to be remounting this component — useState/useRef don't survive
+// that, but sessionStorage does.)
+const ERROR_KEY = 'customerLoginError'
+const DISMISSED_KEY = 'customerLoginDismissed'
+
+function readError(): { message: string; path: string | null } | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const stored = sessionStorage.getItem(ERROR_KEY)
+    return stored ? JSON.parse(stored) : null
+  } catch { return null }
+}
+
+function writeError(val: { message: string; path: string | null } | null) {
+  if (typeof window === 'undefined') return
+  if (val) {
+    sessionStorage.setItem(ERROR_KEY, JSON.stringify(val))
+  } else {
+    sessionStorage.removeItem(ERROR_KEY)
+  }
+}
+
 export default function CustomerLoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<{ message: string; path: string | null } | null>(null)
+  // Initialize from sessionStorage so the error survives component remounts
+  const [error, setError] = useState<{ message: string; path: string | null } | null>(() => readError())
   const [loading, setLoading] = useState(false)
   const submittingRef = useRef(false)
-  const errorRef = useRef<{ message: string; path: string | null } | null>(null)
   const navigate = useNavigate()
   const { signIn } = useAuth()
 
-  // If state somehow gets reset but we have a stashed error, restore it.
-  // Defends against React re-renders, strict-mode double-invokes, etc.
+  // Scroll to top when error first appears
   useEffect(() => {
-    if (error === null && errorRef.current !== null) {
-      console.log('[CustomerLogin] restoring error from ref')
-      setError(errorRef.current)
-    }
-  }, [error])
-
-  useEffect(() => {
-    if (error && errorRef.current) {
-      // Scroll to top so the toast is visible (once)
+    if (error) {
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
   }, [error?.message])
@@ -33,7 +48,7 @@ export default function CustomerLoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Guard against double-submit (in case the form fires twice)
+    // Guard against double-submit (in case the form fires twice in same mount)
     if (submittingRef.current) {
       console.log('[CustomerLogin] already submitting, ignoring')
       return
@@ -41,8 +56,6 @@ export default function CustomerLoginPage() {
     submittingRef.current = true
 
     setLoading(true)
-    setError(null)
-    errorRef.current = null
 
     console.log('[CustomerLogin] calling signIn with role=customer')
     const { error: signInErr, wrongRole, correctLoginPath: path } = await signIn(email, password, 'customer')
@@ -53,10 +66,14 @@ export default function CustomerLoginPage() {
         message: signInErr.message,
         path: wrongRole ? path || null : null,
       }
-      console.log('[CustomerLogin] setting error state:', next)
-      errorRef.current = next
+      console.log('[CustomerLogin] persisting error to sessionStorage:', next)
+      writeError(next)
+      sessionStorage.removeItem(DISMISSED_KEY)
       setError(next)
     } else {
+      // Successful login - clear any error
+      writeError(null)
+      sessionStorage.removeItem(DISMISSED_KEY)
       navigate('/dashboard')
     }
 
@@ -95,7 +112,7 @@ export default function CustomerLoginPage() {
             </div>
             <button
               type="button"
-              onClick={() => { errorRef.current = null; setError(null) }}
+              onClick={() => { writeError(null); sessionStorage.setItem(DISMISSED_KEY, '1'); setError(null) }}
               className="text-red-400 hover:text-red-600 flex-shrink-0"
               aria-label="Dismiss"
             >
