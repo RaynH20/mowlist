@@ -1,12 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   MapPin, Clock, DollarSign, Check, X, Briefcase, Calendar,
   CheckCircle, ChevronDown, ChevronUp, RefreshCw, Phone, AlertCircle,
-  User, Mail, Loader2, ExternalLink, CreditCard
+  User, Mail, Loader2, ExternalLink, CreditCard, Camera, Image as ImageIcon
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
-import { acceptJob, declineJob, updateProviderProfile, getProviderProfile } from '../../lib/api'
+import { acceptJob, declineJob, updateProviderProfile, getProviderProfile, uploadJobPhoto } from '../../lib/api'
 import {
   getAvailableJobsWithDetails,
   getProAssignedJobsWithDetails,
@@ -502,6 +502,48 @@ function AssignedJobCard({
   const nextStep = getNextStep(job.booking_status)
   const payout = job.provider_payout_amount ?? job.estimated_price
 
+  // Photo upload state
+  const [photoMode, setPhotoMode] = useState<'none' | 'before' | 'after'>('none')
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  const beforeFileRef = useRef<HTMLInputElement>(null)
+  const afterFileRef = useRef<HTMLInputElement>(null)
+
+  // Determine if the next step requires a photo
+  const requiresBeforePhoto = nextStep?.action === 'in_progress' && !job.before_photo_url
+  const requiresAfterPhoto = nextStep?.action === 'completed' && !job.after_photo_url
+
+  const handlePhotoSelected = async (file: File, photoType: 'before' | 'after') => {
+    setPhotoError(null)
+
+    // Show preview
+    const reader = new FileReader()
+    reader.onload = (e) => setPhotoPreview(e.target?.result as string)
+    reader.readAsDataURL(file)
+
+    setUploadingPhoto(true)
+    const { data, error } = await uploadJobPhoto(job.id, photoType, file)
+    setUploadingPhoto(false)
+
+    if (error) {
+      setPhotoError(error.message)
+      setPhotoPreview(null)
+      return
+    }
+
+    // Success — proceed to status update
+    setPhotoMode('none')
+    setPhotoPreview(null)
+
+    // Trigger the status update
+    if (photoType === 'before') {
+      onUpdate(job, 'in_progress')
+    } else {
+      onUpdate(job, 'completed')
+    }
+  }
+
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
       <div className={`p-4 ${statusInfo.bgClass}`}>
@@ -569,19 +611,114 @@ function AssignedJobCard({
           </div>
         )}
 
-        {nextStep && (
-          <button
-            onClick={() => onUpdate(job, nextStep.action)}
-            disabled={actionInProgress}
-            className="w-full bg-[#22C55E] text-white py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            {actionInProgress ? (
-              <Loader2 size={18} className="animate-spin" />
-            ) : (
-              <CheckCircle size={18} />
+        {/* Photo gallery for already-uploaded photos */}
+        {(job.before_photo_url || job.after_photo_url) && (
+          <div className="mb-4 grid grid-cols-2 gap-2">
+            {job.before_photo_url && (
+              <div>
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Before</div>
+                <img src={job.before_photo_url} alt="Before" className="w-full aspect-video object-cover rounded-lg border border-slate-200" />
+              </div>
             )}
-            {nextStep.label}
-          </button>
+            {job.after_photo_url && (
+              <div>
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">After</div>
+                <img src={job.after_photo_url} alt="After" className="w-full aspect-video object-cover rounded-lg border border-slate-200" />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Photo upload modal — shown when a photo is required */}
+        {photoMode !== 'none' && (
+          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <div className="flex items-start gap-2 mb-3">
+              <Camera className="text-amber-600 flex-shrink-0 mt-0.5" size={20} />
+              <div>
+                <h4 className="font-semibold text-amber-900">
+                  {photoMode === 'before' ? 'Take a BEFORE photo' : 'Take an AFTER photo'}
+                </h4>
+                <p className="text-sm text-amber-800">
+                  {photoMode === 'before'
+                    ? 'Required to start work. Shows the customer the condition of the lawn.'
+                    : 'Required to mark complete. Shows the customer the work was done.'}
+                </p>
+              </div>
+            </div>
+
+            {photoPreview ? (
+              <div>
+                <img src={photoPreview} alt="Preview" className="w-full aspect-video object-cover rounded-lg mb-3" />
+                {uploadingPhoto && (
+                  <div className="flex items-center justify-center gap-2 text-amber-700 text-sm py-2">
+                    <Loader2 className="animate-spin" size={16} />
+                    Uploading...
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div>
+                <input
+                  ref={photoMode === 'before' ? beforeFileRef : afterFileRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handlePhotoSelected(file, photoMode)
+                  }}
+                />
+                <button
+                  onClick={() => (photoMode === 'before' ? beforeFileRef : afterFileRef).current?.click()}
+                  className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
+                >
+                  <Camera size={18} />
+                  {photoMode === 'before' ? 'Take before photo' : 'Take after photo'}
+                </button>
+              </div>
+            )}
+
+            {photoError && (
+              <p className="text-sm text-red-600 mt-2">{photoError}</p>
+            )}
+
+            <button
+              onClick={() => { setPhotoMode('none'); setPhotoPreview(null); setPhotoError(null) }}
+              className="w-full text-sm text-slate-600 hover:text-slate-800 mt-2 py-1"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {/* Action button */}
+        {nextStep && photoMode === 'none' && (
+          <>
+            {requiresBeforePhoto || requiresAfterPhoto ? (
+              <button
+                onClick={() => setPhotoMode(requiresBeforePhoto ? 'before' : 'after')}
+                disabled={actionInProgress || uploadingPhoto}
+                className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <Camera size={18} />
+                {requiresBeforePhoto ? 'Take BEFORE photo to start' : 'Take AFTER photo to complete'}
+              </button>
+            ) : (
+              <button
+                onClick={() => onUpdate(job, nextStep.action)}
+                disabled={actionInProgress}
+                className="w-full bg-[#22C55E] text-white py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {actionInProgress ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <CheckCircle size={18} />
+                )}
+                {nextStep.label}
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
