@@ -373,6 +373,10 @@ export default function TrackService() {
             beforePhotoUrl={booking.before_photo_url}
             afterPhotoUrl={booking.after_photo_url}
             hasActiveTracking={['on_the_way', 'arrived', 'in_progress'].includes(booking.booking_status)}
+            bookingId={booking.id}
+            address={bookingAddress}
+            proLat={booking.pro_lat}
+            proLng={booking.pro_lng}
           />
         </div>
 

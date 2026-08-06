@@ -1,5 +1,6 @@
 import { CheckCircle, Clock, Truck, MapPin, Scissors, Award, XCircle, AlertCircle, Camera, MapPinned } from 'lucide-react'
-import type { BookingStatus } from '../lib/database.types'
+import type { BookingStatus, Address } from '../lib/database.types'
+import LiveTrackingMap from './LiveTrackingMap'
 
 interface StatusStep {
   id: BookingStatus
@@ -37,6 +38,13 @@ interface BookingStatusTrackerProps {
   beforePhotoUrl?: string | null
   afterPhotoUrl?: string | null
   hasActiveTracking?: boolean
+  /** Booking ID — needed to load live tracking pings */
+  bookingId?: string
+  /** Customer address for the map */
+  address?: Address | null
+  /** Initial pro position from booking */
+  proLat?: number | null
+  proLng?: number | null
 }
 
 export default function BookingStatusTracker({
@@ -47,6 +55,10 @@ export default function BookingStatusTracker({
   beforePhotoUrl,
   afterPhotoUrl,
   hasActiveTracking = false,
+  bookingId,
+  address,
+  proLat,
+  proLng,
 }: BookingStatusTrackerProps) {
   // Special terminal states
   if (status === 'cancelled') {
@@ -199,18 +211,22 @@ export default function BookingStatusTracker({
         </div>
       )}
 
-      {/* Live tracking placeholder — will be replaced with real map */}
-      {hasActiveTracking && (
+      {/* Live tracking map — only when booking is in an active state */}
+      {hasActiveTracking && bookingId && (
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-6">
           <div className="flex items-center gap-2 mb-3">
             <MapPinned className="text-blue-600" size={20} />
             <h3 className="font-semibold text-slate-900">Your pro is on the way</h3>
           </div>
-          <div className="aspect-video bg-white rounded-xl border border-blue-100 flex items-center justify-center text-slate-400 text-sm">
-            Live map (coming next sprint)
-          </div>
-          <p className="text-xs text-slate-500 mt-2">
-            Your pro's location is only visible while the job is active. Tracking automatically ends when the job is marked complete.
+          <LiveTrackingMap
+            bookingId={bookingId}
+            address={address ?? null}
+            initialProLat={proLat}
+            initialProLng={proLng}
+            active={['on_the_way', 'arrived', 'in_progress'].includes(status)}
+          />
+          <p className="text-xs text-slate-500 mt-3">
+            🔒 Your pro's location is only visible while the job is active. Tracking automatically ends when the job is marked complete. We never track outside of an active booking.
           </p>
         </div>
       )}
