@@ -2,6 +2,7 @@ import { CheckCircle, Clock, Truck, MapPin, Scissors, Award, XCircle, AlertCircl
 import type { BookingStatus, Address } from '../lib/database.types'
 import LiveTrackingMap from './LiveTrackingMap'
 import ErrorBoundary from './ErrorBoundary'
+import JobPhotoGallery from './JobPhotoGallery'
 
 interface StatusStep {
   id: BookingStatus
@@ -172,43 +173,16 @@ export default function BookingStatusTracker({
         </div>
       </div>
 
-      {/* Photo timeline (only when at least one photo exists) */}
-      {(beforePhotoUrl || afterPhotoUrl) && (
+      {/* Photo gallery (only when at least one photo exists).
+          Customer side: view-only. Pro side: can add/delete via the
+          allowUpload prop in the pro's job card. */}
+      {(beforePhotoUrl || afterPhotoUrl) && bookingId && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6">
           <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
             <Camera size={18} className="text-slate-500" />
             Job photos
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {beforePhotoUrl ? (
-              <div>
-                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Before</div>
-                <img
-                  src={beforePhotoUrl}
-                  alt="Before service"
-                  className="w-full aspect-video object-cover rounded-xl border border-slate-200"
-                />
-              </div>
-            ) : (
-              <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center text-slate-400 text-sm">
-                Before photo not yet uploaded
-              </div>
-            )}
-            {afterPhotoUrl ? (
-              <div>
-                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">After</div>
-                <img
-                  src={afterPhotoUrl}
-                  alt="After service"
-                  className="w-full aspect-video object-cover rounded-xl border border-slate-200"
-                />
-              </div>
-            ) : (
-              <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center text-slate-400 text-sm">
-                After photo not yet uploaded
-              </div>
-            )}
-          </div>
+          <JobPhotoGallery bookingId={bookingId} allowUpload={false} />
         </div>
       )}
 

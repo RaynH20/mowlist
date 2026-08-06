@@ -14,6 +14,7 @@ import {
   type ProBookingWithDetails
 } from '../../lib/proDashboard'
 import { serviceTypeLabel, yardSizeLabel } from '../../lib/labels'
+import JobPhotoGallery from '../../components/JobPhotoGallery'
 
 export default function ProJobs() {
   const { user } = useAuth()
@@ -611,21 +612,24 @@ function AssignedJobCard({
           </div>
         )}
 
-        {/* Photo gallery for already-uploaded photos */}
+        {/* Multi-photo gallery: before, after, plus up to 3 additional */}
         {(job.before_photo_url || job.after_photo_url) && (
-          <div className="mb-4 grid grid-cols-2 gap-2">
-            {job.before_photo_url && (
-              <div>
-                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Before</div>
-                <img src={job.before_photo_url} alt="Before" className="w-full aspect-video object-cover rounded-lg border border-slate-200" />
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Job photos
               </div>
-            )}
-            {job.after_photo_url && (
-              <div>
-                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">After</div>
-                <img src={job.after_photo_url} alt="After" className="w-full aspect-video object-cover rounded-lg border border-slate-200" />
-              </div>
-            )}
+              {job.booking_status !== 'completed' && (
+                <span className="text-xs text-slate-400">
+                  Show up to 5 photos of the property
+                </span>
+              )}
+            </div>
+            <JobPhotoGallery
+              bookingId={job.id}
+              allowUpload={job.booking_status !== 'completed'}
+              compact
+            />
           </div>
         )}
 

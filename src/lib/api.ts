@@ -9,6 +9,7 @@ import type {
   Payment,
   Payout,
   BookingStatus,
+  BookingPhoto,
 } from './database.types'
 
 // ============ ADDRESSES ============
@@ -868,5 +869,52 @@ export async function createPaymentIntent(amount: number, customerId: string): P
       clientSecret: 'pi_mock_' + Date.now() + '_secret_mock',
       error: null,
     }
+  }
+}
+
+// ============ JOB PHOTOS ============
+
+export const MAX_PHOTOS_PER_BOOKING = 5
+
+/**
+ * Get all photos for a booking, sorted by photo type (before, after first)
+ * then by upload time.
+ */
+export async function getBookingPhotos(bookingId: string): Promise<{ data: BookingPhoto[]; error: Error | null }> {
+  try {
+    const { data, error } = await supabase
+      .from('booking_photos')
+      .select('*')
+      .eq('booking_id', bookingId)
+      .order('uploaded_at', { ascending: true })
+
+    if (error) {
+      // Table might not exist yet
+      if (error.code === '42P01' || error.code === 'PGRST205') {
+        return { data: [], error: null }
+      }
+      throw error
+    }
+    return { data: (data || []) as BookingPhoto[], error: null }
+  } catch (error) {
+    return { data: [], error: error as Error }
+  }
+}
+
+/**
+ * Delete a photo by ID. Used when pro wants to remove a photo before
+ * finalizing the job.
+ */
+export async function deleteBookingPhoto(photoId: string): Promise<{ error: Error | null }> {
+  try {
+    const { error } = await supabase
+      .from('booking_photos')
+      .delete()
+      .eq('id', photoId)
+
+    if (error) throw error
+    return { error: null }
+  } catch (error) {
+    return { error: error as Error }
   }
 }

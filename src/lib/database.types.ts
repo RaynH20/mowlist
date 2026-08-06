@@ -161,6 +161,18 @@ export interface BookingStatusEvent {
   created_at: string
 }
 
+export type PhotoType = 'before' | 'during' | 'after' | 'issue' | 'completion'
+
+export interface BookingPhoto {
+  id: string
+  booking_id: string
+  photo_type: PhotoType
+  photo_url: string
+  caption: string | null
+  uploaded_by: string
+  uploaded_at: string
+}
+
 export type PayoutStatus = 'pending' | 'in_transit' | 'paid' | 'failed' | 'cancelled'
 
 export interface Payment {
