@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Pause, X, Loader2, AlertCircle, Calendar, Scissors, RefreshCw, FileText, Clock, ArrowRight } from 'lucide-react'
+import { Pause, X, Loader2, AlertCircle, Calendar, Scissors, RefreshCw, FileText, Clock, ArrowRight, User } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { getCustomerBookings, getCustomerQuoteRequests, updateBookingStatus } from '../../lib/api'
 import type { Booking, QuoteRequest } from '../../lib/database.types'
@@ -155,13 +155,14 @@ export default function MyServices() {
 
   // Render a booking card. Returns the JSX so we can use it both in the
   // "Action Needed" section (top) and "Upcoming Services" (regular list).
-  const renderBookingCard = (booking: Booking, showRecurringControls: boolean) => {
+  const renderBookingCard = (booking: any, showRecurringControls: boolean) => {
     const isActionNeeded =
       booking.booking_status === 'provider_assigned' || booking.booking_status === 'requested'
     return (
-      <div
+      <Link
         key={booking.id}
-        className={`rounded-xl shadow-sm p-6 ${
+        to={`/dashboard/track?booking=${booking.id}`}
+        className={`block rounded-xl shadow-sm p-6 transition-all hover:shadow-md hover:border-[#22C55E] cursor-pointer ${
           isActionNeeded ? 'bg-amber-50 border-2 border-amber-200' : 'bg-white'
         }`}
       >
@@ -222,7 +223,7 @@ export default function MyServices() {
           </div>
         )}
         {showRecurringControls && isRecurring(booking) && !isActionNeeded && (
-          <div className="mt-4 pt-4 border-t flex items-center gap-4">
+          <div className="mt-4 pt-4 border-t flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
             <button
               disabled={updating === booking.id}
               className="flex items-center gap-2 text-slate-600 hover:text-[#22C55E] transition-colors disabled:opacity-50 text-sm"
@@ -240,7 +241,21 @@ export default function MyServices() {
             </button>
           </div>
         )}
-      </div>
+
+        {/* Provider name at bottom */}
+        {booking.provider_name && (
+          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-1.5 text-xs text-slate-500">
+            <User size={12} />
+            <span>Pro: <span className="font-medium text-slate-700">{booking.provider_name}</span></span>
+          </div>
+        )}
+
+        {/* Click hint */}
+        <div className="mt-2 flex items-center justify-end gap-1 text-xs text-[#22C55E] font-medium">
+          View details
+          <ArrowRight size={12} />
+        </div>
+      </Link>
     )
   }
 

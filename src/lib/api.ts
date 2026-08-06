@@ -156,7 +156,7 @@ export async function createBooking(booking: Partial<Booking>): Promise<{ data: 
   }
 }
 
-export async function getCustomerBookings(customerId: string): Promise<{ data: Booking[]; error: Error | null }> {
+export async function getCustomerBookings(customerId: string): Promise<{ data: any[]; error: Error | null }> {
   try {
     const { data, error } = await supabase
       .from('bookings')
@@ -165,7 +165,27 @@ export async function getCustomerBookings(customerId: string): Promise<{ data: B
       .order('created_at', { ascending: false })
 
     if (error) throw error
-    return { data: data || [], error: null }
+
+    // Hydrate with provider info
+    const providerIds = [...new Set((data || []).map(b => b.provider_id).filter(Boolean))]
+    let providerMap = new Map<string, { business_name: string; first_name: string; last_name: string }>()
+
+    if (providerIds.length > 0) {
+      const { data: providers } = await supabase
+        .from('provider_profiles')
+        .select('id, business_name, first_name, last_name')
+        .in('id', providerIds)
+      providerMap = new Map((providers || []).map(p => [p.id, p]))
+    }
+
+    const hydrated = (data || []).map(b => {
+      const provider = b.provider_id ? providerMap.get(b.provider_id) : null
+      const providerName = provider?.business_name
+        || (provider ? `${provider.first_name || ''} ${provider.last_name || ''}`.trim() : null)
+      return { ...b, provider_name: providerName }
+    })
+
+    return { data: hydrated, error: null }
   } catch (error) {
     return { data: [], error: error as Error }
   }
@@ -920,18 +940,40 @@ export async function deleteBookingPhoto(photoId: string): Promise<{ error: Erro
 }
 
 /**
- * Get all payments for a customer, sorted newest first.
+ * Get all payments for a customer. Joins through bookings to catch
+ * payments where customer_id might be stored differently.
  */
 export async function getCustomerPayments(customerId: string): Promise<{ data: Payment[]; error: Error | null }> {
   try {
+    // First get all bookings for this customer
+    const { data: customerBookings, error: bErr } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('customer_id', customerId)
+
+    if (bErr) throw bErr
+
+    const bookingIds = (customerBookings || []).map(b => b.id)
+
+    // Query payments by both customer_id AND booking_id (in case
+    // either is set but not both)
     const { data, error } = await supabase
       .from('payments')
       .select('*')
-      .eq('customer_id', customerId)
+      .or(`customer_id.eq.${customerId},booking_id.in.(${bookingIds.length ? bookingIds.join(',') : 'null'})`)
       .order('created_at', { ascending: false })
 
     if (error) throw error
-    return { data: (data || []) as Payment[], error: null }
+
+    // Dedupe (in case a payment is matched by both)
+    const seen = new Set<string>()
+    const deduped = (data || []).filter(p => {
+      if (seen.has(p.id)) return false
+      seen.add(p.id)
+      return true
+    })
+
+    return { data: deduped as Payment[], error: null }
   } catch (error) {
     return { data: [], error: error as Error }
   }

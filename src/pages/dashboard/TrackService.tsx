@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   Clock, MapPin, CheckCircle, Car, Calendar, Scissors, ArrowRight,
   Loader2, AlertCircle, Phone, MessageCircle, Camera, Package,
@@ -80,8 +80,11 @@ export default function TrackService() {
   const [addresses, setAddresses] = useState<Address[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Read ?booking=ID from URL to auto-open a specific booking
+  const [searchParams] = useSearchParams()
+  const urlBookingId = searchParams.get('booking')
   // Which booking the user is currently viewing the timeline for
-  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(urlBookingId)
 
   useEffect(() => {
     if (!user) return

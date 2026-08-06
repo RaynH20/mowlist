@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth-context'
 
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [loginDropdownOpen, setLoginDropdownOpen] = useState(false)
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
 
@@ -80,31 +81,39 @@ export default function Header() {
               </>
             ) : (
               <>
-                <details className="relative group">
-                  <summary className="list-none cursor-pointer text-slate-600 hover:text-[#22C55E] transition-colors font-medium flex items-center gap-1">
+                <div className="relative">
+                  <button
+                    onClick={() => setLoginDropdownOpen(!loginDropdownOpen)}
+                    onBlur={() => setTimeout(() => setLoginDropdownOpen(false), 150)}
+                    className="text-slate-600 hover:text-[#22C55E] transition-colors font-medium flex items-center gap-1"
+                  >
                     Log In
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" className="transition-transform group-open:rotate-180">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" className={`transition-transform ${loginDropdownOpen ? 'rotate-180' : ''}`}>
                       <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
-                  </summary>
-                  <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-lg border border-slate-100 py-2 z-50">
-                    <Link
-                      to="/login/customer"
-                      className="block px-4 py-2.5 hover:bg-slate-50 transition-colors"
-                    >
-                      <div className="font-medium text-slate-900 text-sm">I'm a customer</div>
-                      <div className="text-xs text-slate-500">Book lawn care for my home</div>
-                    </Link>
-                    <div className="border-t border-slate-100 my-1" />
-                    <Link
-                      to="/login/pro"
-                      className="block px-4 py-2.5 hover:bg-slate-50 transition-colors"
-                    >
-                      <div className="font-medium text-slate-900 text-sm">I'm a lawn pro</div>
-                      <div className="text-xs text-slate-500">Sign in to my pro dashboard</div>
-                    </Link>
-                  </div>
-                </details>
+                  </button>
+                  {loginDropdownOpen && (
+                    <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-lg border border-slate-100 py-2 z-50">
+                      <Link
+                        to="/login/customer"
+                        onClick={() => setLoginDropdownOpen(false)}
+                        className="block px-4 py-2.5 hover:bg-slate-50 transition-colors"
+                      >
+                        <div className="font-medium text-slate-900 text-sm">I'm a customer</div>
+                        <div className="text-xs text-slate-500">Book lawn care for my home</div>
+                      </Link>
+                      <div className="border-t border-slate-100 my-1" />
+                      <Link
+                        to="/login/pro"
+                        onClick={() => setLoginDropdownOpen(false)}
+                        className="block px-4 py-2.5 hover:bg-slate-50 transition-colors"
+                      >
+                        <div className="font-medium text-slate-900 text-sm">I'm a lawn pro</div>
+                        <div className="text-xs text-slate-500">Sign in to my pro dashboard</div>
+                      </Link>
+                    </div>
+                  )}
+                </div>
                 <Link
                   to="/book"
                   className="bg-[#22C55E] text-white px-5 py-2.5 rounded-lg font-medium hover:bg-[#16A34A] transition-colors"

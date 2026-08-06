@@ -313,7 +313,7 @@ export default function Dashboard() {
             {upcomingBookings.slice(0, 3).map((booking) => (
               <Link
                 key={booking.id}
-                to="/dashboard/track"
+                to={`/dashboard/track?booking=${booking.id}`}
                 className="block border border-slate-200 rounded-lg p-3 hover:border-[#22C55E] hover:bg-green-50/30 transition-colors"
               >
                 <div className="flex items-center gap-3">
@@ -325,9 +325,15 @@ export default function Dashboard() {
                       {YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
                     </p>
                     <p className="text-xs text-slate-500">{formatDate(booking.scheduled_date)}</p>
+                    {(booking as any).provider_name && (
+                      <p className="text-xs text-slate-400 truncate">
+                        Pro: <span className="font-medium text-slate-600">{(booking as any).provider_name}</span>
+                      </p>
+                    )}
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="text-sm font-semibold text-slate-900">${booking.estimated_price}</p>
+                    <p className="text-xs text-[#22C55E] font-medium">View →</p>
                   </div>
                 </div>
               </Link>

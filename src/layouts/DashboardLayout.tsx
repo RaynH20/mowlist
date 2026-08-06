@@ -26,24 +26,27 @@ export default function DashboardLayout() {
 
   const sidebarContent = (
     <>
-      <div className="p-6 border-b">
+      <div className="p-6 border-b border-[#16A34A]">
         <Link to="/" className="text-xl font-bold" onClick={() => setIsMobileMenuOpen(false)}>
-          <span className="text-[#22C55E]">Mow</span>
-          <span className="text-[#1E40AF]">List</span>
+          <span className="text-white">Mow</span>
+          <span className="text-[#86EFAC]">List</span>
         </Link>
+        {user?.email && (
+          <p className="text-xs text-green-100 mt-1 truncate opacity-80">{user.email}</p>
+        )}
       </div>
       {/* Book Service button - always visible, prominent */}
-      <div className="p-4 border-b">
+      <div className="p-4 border-b border-[#16A34A]">
         <Link
           to="/book"
           onClick={() => setIsMobileMenuOpen(false)}
-          className="flex items-center justify-center gap-2 w-full bg-[#22C55E] text-white px-4 py-3 rounded-lg font-semibold hover:bg-[#16A34A] transition-colors shadow-sm"
+          className="flex items-center justify-center gap-2 w-full bg-white text-[#16A34A] px-4 py-3 rounded-lg font-semibold hover:bg-green-50 transition-colors shadow-sm"
         >
           <Plus size={20} />
           Book a Service
         </Link>
       </div>
-      <nav className="px-4 py-4">
+      <nav className="px-4 py-4 flex-1">
         {navItems.map((item) => (
           <Link
             key={item.path}
@@ -51,8 +54,8 @@ export default function DashboardLayout() {
             onClick={() => setIsMobileMenuOpen(false)}
             className={`flex items-center gap-3 px-4 py-3 rounded-lg mb-1 transition-colors ${
               location.pathname === item.path
-                ? 'bg-green-50 text-[#22C55E] font-medium'
-                : 'text-slate-600 hover:bg-slate-50'
+                ? 'bg-white/15 text-white font-medium'
+                : 'text-green-50 hover:bg-white/10'
             }`}
           >
             <item.icon size={20} />
@@ -60,10 +63,10 @@ export default function DashboardLayout() {
           </Link>
         ))}
       </nav>
-      <div className="absolute bottom-0 left-0 right-0 p-4 border-t bg-white">
+      <div className="p-4 border-t border-[#16A34A]">
         <button
           onClick={handleSignOut}
-          className="w-full flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors text-left"
+          className="w-full flex items-center gap-3 px-4 py-3 text-green-50 hover:bg-white/10 rounded-lg transition-colors text-left"
         >
           <LogOut size={20} />
           Log Out
@@ -91,7 +94,7 @@ export default function DashboardLayout() {
           onClick={() => setIsMobileMenuOpen(false)}
         >
           <aside
-            className="w-64 bg-white h-full relative"
+            className="w-64 bg-[#22C55E] text-white h-full relative flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {sidebarContent}
@@ -100,7 +103,7 @@ export default function DashboardLayout() {
       )}
 
       {/* Desktop sidebar - always visible */}
-      <aside className="w-64 bg-white border-r hidden md:block fixed h-full">
+      <aside className="w-64 bg-[#22C55E] text-white hidden md:block fixed h-full flex flex-col">
         {sidebarContent}
       </aside>
 

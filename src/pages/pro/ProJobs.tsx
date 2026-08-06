@@ -302,14 +302,19 @@ export default function ProJobs() {
                 className="w-full text-left bg-white rounded-xl p-3 border border-slate-100 hover:border-[#22C55E] hover:shadow-sm transition-all"
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-slate-900">{job.customer_name || 'Customer'}</p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <p className="text-sm font-medium text-slate-900">{job.customer_name || 'Customer'}</p>
+                      <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-medium">
+                        {yardSizeLabel(job.yard_size_category)}
+                      </span>
+                    </div>
                     <p className="text-xs text-slate-500">{formatAddress(job)}</p>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      {formatDate(job.scheduled_date)} {job.scheduled_time_window || ''}
+                      {formatDate(job.scheduled_date)} {job.scheduled_time_window || ''} · {serviceTypeLabel(job.service_type)}
                     </p>
                   </div>
-                  <div className="text-right flex items-center gap-2">
+                  <div className="text-right flex items-center gap-2 flex-shrink-0 ml-3">
                     <div>
                       <p className="text-sm font-bold text-[#22C55E]">
                         +${(job.provider_payout_amount || 0).toFixed(2)}
@@ -582,7 +587,10 @@ function AssignedJobCard({
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-      <div className={`p-4 ${statusInfo.bgClass}`}>
+      <button
+        onClick={onToggle}
+        className={`w-full text-left p-4 ${statusInfo.bgClass} hover:brightness-95 transition-all`}
+      >
         <div className="flex items-start justify-between mb-2">
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -590,15 +598,21 @@ function AssignedJobCard({
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusInfo.badgeClass}`}>
                 {statusInfo.label}
               </span>
+              <span className="text-xs px-1.5 py-0.5 bg-white/60 text-slate-700 rounded font-medium">
+                {yardSizeLabel(job.yard_size_category)}
+              </span>
             </div>
             <p className="text-sm text-slate-600">{formatAddress(job)}</p>
           </div>
-          <div className="text-right">
-            <p className="text-xs text-slate-500">You'll earn</p>
-            <p className="text-xl font-bold text-[#22C55E]">${payout.toFixed(2)}</p>
+          <div className="text-right flex items-center gap-2 flex-shrink-0">
+            <div>
+              <p className="text-xs text-slate-500">You'll earn</p>
+              <p className="text-xl font-bold text-[#22C55E]">${payout.toFixed(2)}</p>
+            </div>
+            {expanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
           </div>
         </div>
-        <div className="flex items-center gap-4 text-sm text-slate-600 mt-2">
+        <div className="flex items-center gap-4 text-sm text-slate-600 mt-2 flex-wrap">
           <span className="flex items-center gap-1">
             <Clock size={14} /> {formatDate(job.scheduled_date)} · {job.scheduled_time_window || 'Time TBD'}
           </span>
@@ -606,17 +620,9 @@ function AssignedJobCard({
             <User size={14} /> {serviceTypeLabel(job.service_type)}
           </span>
         </div>
-      </div>
+      </button>
 
       <div className="p-4">
-        <button
-          onClick={onToggle}
-          className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1 mb-3"
-        >
-          {expanded ? 'Hide' : 'Show'} job details
-          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
-
         {expanded && (
           <div className="space-y-3 mb-4 pb-4 border-b border-slate-100">
             {job.notes && (

@@ -45,6 +45,15 @@ export default function CustomerLoginPage() {
     }
   }, [error?.message])
 
+  // Clear stale errors when the page is freshly loaded (user navigated back)
+  // OR after 5 minutes (so old errors don't haunt the user)
+  useEffect(() => {
+    // Clear on mount — fresh navigation should not show stale errors
+    writeError(null)
+    sessionStorage.removeItem(DISMISSED_KEY)
+    setError(null)
+  }, [])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
