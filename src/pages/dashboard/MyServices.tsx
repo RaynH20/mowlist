@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Pause, X, Loader2, AlertCircle, Calendar, Scissors, RefreshCw, FileText, Clock, ArrowRight, User } from 'lucide-react'
+import { Pause, X, Loader2, AlertCircle, Calendar, Scissors, RefreshCw, FileText, Clock, ArrowRight, User, Zap, CheckCircle2 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { getCustomerBookings, getCustomerQuoteRequests, updateBookingStatus } from '../../lib/api'
 import type { Booking, QuoteRequest } from '../../lib/database.types'
@@ -143,14 +143,28 @@ export default function MyServices() {
   const openQuotes = quoteRequests.filter((q) => OPEN_QUOTE_STATUSES[q.status])
   const pastQuotes = quoteRequests.filter((q) => !OPEN_QUOTE_STATUSES[q.status])
 
-  // Bookings that need the customer's attention (still need to pay, or waiting
-  // for a pro to accept). These float to the top so they aren't buried.
-  const actionNeeded = activeServices.filter(
-    (b) => b.booking_status === 'provider_assigned' || b.booking_status === 'requested'
+  // ACTIVE NOW: jobs happening right now (the pro is on their way, on-site, or mowing)
+  const ACTIVE_NOW_STATUSES = ['on_the_way', 'arrived', 'in_progress', 'mowing']
+  const activeNow = activeServices.filter((b) => ACTIVE_NOW_STATUSES.includes(b.booking_status))
+
+  // RECENTLY COMPLETED: finished in the last 7 days
+  const sevenDaysAgo = new Date()
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+  const recentlyCompleted = bookings.filter(
+    (b) => b.booking_status === 'completed' &&
+    b.completed_at && new Date(b.completed_at) >= sevenDaysAgo
   )
-  const stableActiveServices = activeServices.filter(
-    (b) => b.booking_status !== 'provider_assigned' && b.booking_status !== 'requested'
+
+  // UPCOMING: future scheduled services (not active now)
+  const upcoming = activeServices.filter((b) => !ACTIVE_NOW_STATUSES.includes(b.booking_status))
+
+  // PAST: cancelled, refunded, or completed > 7 days ago
+  const olderCompleted = bookings.filter(
+    (b) => b.booking_status === 'completed' &&
+    (!b.completed_at || new Date(b.completed_at) < sevenDaysAgo)
   )
+  const pastOnly = pastServices.filter((b) => b.booking_status !== 'completed')
+  const allPast = [...pastOnly, ...olderCompleted]
 
   const isEmpty = bookings.length === 0 && quoteRequests.length === 0
 
@@ -288,31 +302,19 @@ export default function MyServices() {
         </div>
       ) : (
         <>
-          {/* Action needed (bookings awaiting customer action — top of page) */}
-          {actionNeeded.length > 0 && (
-            <div className="mb-8">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-7 h-7 bg-amber-100 rounded-full flex items-center justify-center">
-                  <AlertCircle className="text-amber-600" size={16} />
-                </div>
-                <h2 className="text-lg font-semibold text-slate-900">Action Needed</h2>
-                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
-                  {actionNeeded.length}
-                </span>
-              </div>
-              <div className="space-y-4">
-                {actionNeeded.map((booking) => renderBookingCard(booking, false))}
-              </div>
-            </div>
-          )}
-
-          {/* Pending quote requests */}
+          {/* ============ 1. PENDING QUOTES (stays in limbo at top) ============ */}
           {openQuotes.length > 0 && (
             <div className="mb-8">
               <div className="flex items-center gap-2 mb-3">
                 <FileText size={18} className="text-[#1E40AF]" />
                 <h2 className="text-lg font-semibold text-slate-900">Pending Quotes</h2>
+                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                  {openQuotes.length}
+                </span>
               </div>
+              <p className="text-xs text-slate-500 mb-3">
+                These are custom jobs awaiting a price quote. They'll stay here until you approve or decline.
+              </p>
               <div className="space-y-3">
                 {openQuotes.map((quote) => {
                   const statusInfo = QUOTE_STATUS_LABELS[quote.status] || { label: quote.status, color: 'bg-slate-100 text-slate-600' }
@@ -354,50 +356,135 @@ export default function MyServices() {
             </div>
           )}
 
-          {/* Active services (bookings) — action-needed ones moved out above */}
-          {stableActiveServices.length > 0 && (
+          {/* ============ 2. ACTIVE NOW (happening right now) ============ */}
+          {activeNow.length > 0 && (
+            <div className="mb-8">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="relative">
+                  <div className="w-7 h-7 bg-[#22C55E] rounded-full flex items-center justify-center">
+                    <Zap className="text-white" size={16} />
+                  </div>
+                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-[#22C55E] rounded-full ring-2 ring-white animate-pulse" />
+                </div>
+                <h2 className="text-lg font-semibold text-slate-900">Active Now</h2>
+                <span className="text-xs bg-[#22C55E] text-white px-2 py-0.5 rounded-full font-medium">
+                  {activeNow.length}
+                </span>
+              </div>
+              <div className="space-y-4">
+                {activeNow.map((booking) => renderBookingCard(booking, true))}
+              </div>
+            </div>
+          )}
+
+          {/* ============ 3. RECENTLY COMPLETED (last 7 days) ============ */}
+          {recentlyCompleted.length > 0 && (
+            <div className="mb-8">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-7 h-7 bg-emerald-100 rounded-full flex items-center justify-center">
+                  <CheckCircle2 className="text-emerald-600" size={16} />
+                </div>
+                <h2 className="text-lg font-semibold text-slate-900">Recently Completed</h2>
+                <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
+                  {recentlyCompleted.length}
+                </span>
+              </div>
+              <div className="space-y-3">
+                {recentlyCompleted.map((booking) => (
+                  <Link
+                    key={booking.id}
+                    to={`/dashboard/track?booking=${booking.id}`}
+                    className="block bg-white rounded-lg shadow-sm p-4 hover:shadow-md hover:border-emerald-300 border border-transparent transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <ProAvatar
+                        imageUrl={(booking as any).provider_image_url}
+                        name={booking.provider_name}
+                        size="md"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-slate-900 text-sm">
+                          {YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
+                          {booking.provider_name && (
+                            <span className="text-slate-500 font-normal"> · with {booking.provider_name}</span>
+                          )}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {booking.completed_at ? new Date(booking.completed_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'Recently'}
+                          {' · '}
+                          {FREQUENCY_LABELS[booking.service_frequency]}
+                        </p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="font-semibold text-slate-900">{formatPrice(booking.estimated_price)}</p>
+                        <p className="text-xs text-emerald-600 font-medium mt-0.5 flex items-center gap-1 justify-end">
+                          <CheckCircle2 size={10} /> Done
+                        </p>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ============ 4. UPCOMING SERVICES (scheduled future) ============ */}
+          {upcoming.length > 0 && (
             <div className="mb-8">
               <div className="flex items-center gap-2 mb-3">
                 <Scissors size={18} className="text-[#22C55E]" />
                 <h2 className="text-lg font-semibold text-slate-900">Upcoming Services</h2>
                 <span className="text-xs bg-green-100 text-[#22C55E] px-2 py-0.5 rounded-full font-medium">
-                  {stableActiveServices.length}
+                  {upcoming.length}
                 </span>
               </div>
               <div className="space-y-4">
-                {stableActiveServices.map((booking) => renderBookingCard(booking, true))}
+                {upcoming.map((booking) => renderBookingCard(booking, true))}
               </div>
             </div>
           )}
 
-          {/* Past bookings */}
-          {pastServices.length > 0 && (
-            <>
-              <h2 className="text-lg font-semibold text-slate-900 mb-3">History</h2>
+          {/* ============ 5. PAST SERVICES (cancelled, refunded, or completed > 7 days ago) ============ */}
+          {allPast.length > 0 && (
+            <div className="mb-8">
+              <h2 className="text-lg font-semibold text-slate-900 mb-3">Past Services</h2>
               <div className="space-y-3">
-                {pastServices.slice(0, 10).map((booking) => (
-                  <div key={booking.id} className="bg-white rounded-lg shadow-sm p-4 flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-slate-900 text-sm">
-                        {YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        {formatDate(booking.scheduled_date)} • {FREQUENCY_LABELS[booking.service_frequency]}
-                      </p>
+                {allPast.slice(0, 10).map((booking) => (
+                  <Link
+                    key={booking.id}
+                    to={`/dashboard/track?booking=${booking.id}`}
+                    className="block bg-white rounded-lg shadow-sm p-4 hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <ProAvatar
+                          imageUrl={(booking as any).provider_image_url}
+                          name={booking.provider_name}
+                          size="sm"
+                        />
+                        <div className="min-w-0">
+                          <p className="font-medium text-slate-900 text-sm truncate">
+                            {YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {formatDate(booking.scheduled_date)} · {FREQUENCY_LABELS[booking.service_frequency]}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="font-semibold text-slate-900 text-sm">{formatPrice(booking.estimated_price)}</p>
+                        <p className="text-xs text-slate-500 mt-0.5 capitalize">{booking.booking_status}</p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-slate-900">{formatPrice(booking.estimated_price)}</p>
-                      <p className="text-xs text-slate-500 mt-0.5 capitalize">{booking.booking_status}</p>
-                    </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
-            </>
+            </div>
           )}
 
           {/* Past quote requests (declined/approved) */}
           {pastQuotes.length > 0 && (
-            <>
+            <div className="mb-8">
               <h2 className="text-lg font-semibold text-slate-900 mb-3 mt-6">Past Quotes</h2>
               <div className="space-y-3">
                 {pastQuotes.slice(0, 10).map((quote) => {
@@ -427,7 +514,7 @@ export default function MyServices() {
                   )
                 })}
               </div>
-            </>
+            </div>
           )}
         </>
       )}

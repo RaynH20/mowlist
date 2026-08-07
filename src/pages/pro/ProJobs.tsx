@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom'
 import {
   MapPin, Clock, DollarSign, Check, X, Briefcase, Calendar,
   CheckCircle, ChevronDown, ChevronUp, RefreshCw, Phone, AlertCircle,
-  User, Mail, Loader2, ExternalLink, CreditCard, Camera, Image as ImageIcon
+  User, Mail, Loader2, ExternalLink, CreditCard, Camera, Image as ImageIcon, FileText
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
-import { acceptJob, declineJob, updateProviderProfile, getProviderProfile, uploadJobPhoto } from '../../lib/api'
+import { acceptJob, declineJob, updateProviderProfile, getProviderProfile, uploadJobPhoto, getPendingQuoteRequests, updateQuoteRequest } from '../../lib/api'
 import {
   getAvailableJobsWithDetails,
   getProAssignedJobsWithDetails,
@@ -22,8 +22,10 @@ export default function ProJobs() {
   const [loading, setLoading] = useState(true)
   const [availableJobs, setAvailableJobs] = useState<ProBookingWithDetails[]>([])
   const [assignedJobs, setAssignedJobs] = useState<ProBookingWithDetails[]>([])
+  const [openQuotes, setOpenQuotes] = useState<any[]>([])
   const [isAvailable, setIsAvailable] = useState(true)
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
+  const [quoteActionInProgress, setQuoteActionInProgress] = useState<string | null>(null)
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   // Stripe Connect onboarding state — shows a banner if not fully set up
   const [stripeReady, setStripeReady] = useState<boolean | null>(null)
@@ -37,15 +39,17 @@ export default function ProJobs() {
     if (!user) return
     setLoading(true)
     try {
-      const [availRes, assignedRes, profileRes] = await Promise.all([
+      const [availRes, assignedRes, profileRes, quotesRes] = await Promise.all([
         getAvailableJobsWithDetails(),
         getProAssignedJobsWithDetails(user.id),
         getProviderProfile(user.id),
+        getPendingQuoteRequests(),
       ])
       if (availRes.error) console.error('Error loading available jobs:', availRes.error)
       if (assignedRes.error) console.error('Error loading assigned jobs:', assignedRes.error)
       setAvailableJobs(availRes.data || [])
       setAssignedJobs(assignedRes.data || [])
+      setOpenQuotes(quotesRes.data || [])
       // Compute Stripe Connect readiness for the banner
       const pd: any = profileRes.data
       setStripeConnectAccountId(pd?.stripe_connect_account_id || null)
@@ -57,6 +61,21 @@ export default function ProJobs() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleSubmitQuote = async (quote: any, price: number) => {
+    setQuoteActionInProgress(quote.id)
+    const { error } = await updateQuoteRequest(quote.id, {
+      status: 'quoted',
+      quoted_price: price,
+    } as any)
+    setQuoteActionInProgress(null)
+    if (error) {
+      showToast('error', `Couldn't submit quote: ${error.message}`)
+      return
+    }
+    showToast('success', `Sent $${price} quote to ${quote.customer_name || 'customer'}!`)
+    setOpenQuotes(openQuotes.filter(q => q.id !== quote.id))
   }
 
   const showToast = (type: 'success' | 'error', message: string) => {
@@ -393,6 +412,132 @@ export default function ProJobs() {
                 formatAddress={formatAddress}
               />
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* ============ QUOTE REQUESTS (custom jobs awaiting pro quote) ============ */}
+      {openQuotes.length > 0 && (
+        <div className="mt-8">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-7 h-7 bg-blue-100 rounded-full flex items-center justify-center">
+              <FileText className="text-blue-600" size={16} />
+            </div>
+            <h2 className="text-lg font-semibold text-slate-900">Quote Requests</h2>
+            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+              {openQuotes.length}
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 mb-3">
+            Custom jobs from customers that need a price quote. Send them your best offer.
+          </p>
+          <div className="space-y-3">
+            {openQuotes.map((quote) => (
+              <QuoteRequestCard
+                key={quote.id}
+                quote={quote}
+                onSubmitQuote={handleSubmitQuote}
+                actionInProgress={quoteActionInProgress === quote.id}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function QuoteRequestCard({
+  quote, onSubmitQuote, actionInProgress,
+}: {
+  quote: any
+  onSubmitQuote: (q: any, price: number) => Promise<void>
+  actionInProgress: boolean
+}) {
+  const [price, setPrice] = useState<string>('')
+  const [expanded, setExpanded] = useState(false)
+
+  const propertyLabel = quote.property_type === 'other' && quote.property_type_other
+    ? quote.property_type_other
+    : quote.property_type?.charAt(0).toUpperCase() + (quote.property_type?.slice(1) || '')
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-3 mb-2">
+          <div>
+            <p className="font-semibold text-slate-900">
+              {propertyLabel} <span className="text-slate-500 font-normal text-sm">— Custom Quote</span>
+            </p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Submitted {new Date(quote.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </p>
+          </div>
+        </div>
+        <p className="text-sm text-slate-700 mb-3">
+          {quote.description || quote.notes || 'Customer needs custom service'}
+        </p>
+        <div className="flex flex-wrap gap-2 text-xs mb-3">
+          {quote.yard_size_category && (
+            <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded">
+              Yard: {quote.yard_size_category}
+            </span>
+          )}
+          {quote.service_frequency && (
+            <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded">
+              {quote.service_frequency}
+            </span>
+          )}
+          {quote.address && (
+            <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded flex items-center gap-1">
+              <MapPin size={10} /> {quote.address}
+            </span>
+          )}
+        </div>
+
+        {!expanded ? (
+          <button
+            onClick={() => setExpanded(true)}
+            className="w-full bg-[#22C55E] text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-[#16A34A] transition-colors"
+          >
+            Send a quote
+          </button>
+        ) : (
+          <div className="border-t border-slate-100 pt-3 mt-3">
+            <label className="block text-xs font-medium text-slate-700 mb-1.5">
+              Your price (USD)
+            </label>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-medium">$</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  placeholder="0"
+                  className="w-full pl-7 pr-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#22C55E] focus:border-transparent"
+                />
+              </div>
+              <button
+                onClick={() => onSubmitQuote(quote, parseFloat(price))}
+                disabled={!price || parseFloat(price) <= 0 || actionInProgress}
+                className="bg-[#22C55E] text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-[#16A34A] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                {actionInProgress ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                Send
+              </button>
+              <button
+                onClick={() => { setExpanded(false); setPrice('') }}
+                className="bg-slate-100 text-slate-700 px-3 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">
+              Customer will see your quote in their "Pending Quotes" and can accept or decline.
+            </p>
           </div>
         )}
       </div>

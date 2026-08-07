@@ -11,6 +11,7 @@ import {
 } from '../../lib/stripeCustomer'
 import { getCustomerPayments, getCustomerBookings } from '../../lib/api'
 import type { Payment, Booking } from '../../lib/database.types'
+import ProAvatar from '../../components/ProAvatar'
 
 type PaymentWithBooking = Payment & {
   booking?: Pick<Booking, 'id' | 'scheduled_date' | 'service_type' | 'service_frequency' | 'yard_size_category'>

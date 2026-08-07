@@ -486,13 +486,14 @@ export async function getAvailableJobs(providerId: string): Promise<{ data: Book
       .eq('user_id', providerId)
       .maybeSingle()
 
-    // For now, get all bookings that don't have a provider assigned
-    // In production, this would filter by location
+    // Get bookings that are awaiting a pro: either paid ('booked') or
+    // pre-payment ('requested' for Option A / pay-on-completion).
+    // In production, this would filter by location/service area.
     const { data, error } = await supabase
       .from('bookings')
       .select('*')
-      .eq('provider_id', null)
-      .eq('booking_status', 'booked')
+      .is('provider_id', null)
+      .in('booking_status', ['requested', 'booked'])
       .order('scheduled_date', { ascending: true })
 
     if (error) throw error
