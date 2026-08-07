@@ -1,13 +1,26 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { Menu, X, LogOut, User, Scissors } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../lib/auth-context'
 
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [loginDropdownOpen, setLoginDropdownOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!loginDropdownOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setLoginDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [loginDropdownOpen])
 
   const handleSignOut = async () => {
     await signOut()
@@ -81,11 +94,12 @@ export default function Header() {
               </>
             ) : (
               <>
-                <div className="relative">
+                <div className="relative" ref={dropdownRef}>
                   <button
                     onClick={() => setLoginDropdownOpen(!loginDropdownOpen)}
-                    onBlur={() => setTimeout(() => setLoginDropdownOpen(false), 150)}
-                    className="text-slate-600 hover:text-[#22C55E] transition-colors font-medium flex items-center gap-1"
+                    aria-haspopup="true"
+                    aria-expanded={loginDropdownOpen}
+                    className="text-slate-600 hover:text-[#22C55E] transition-colors font-medium flex items-center gap-1 px-2 py-1"
                   >
                     Log In
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" className={`transition-transform ${loginDropdownOpen ? 'rotate-180' : ''}`}>
@@ -93,7 +107,10 @@ export default function Header() {
                     </svg>
                   </button>
                   {loginDropdownOpen && (
-                    <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-lg border border-slate-100 py-2 z-50">
+                    <div
+                      className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-lg border border-slate-100 py-2 z-50"
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
                       <Link
                         to="/login/customer"
                         onClick={() => setLoginDropdownOpen(false)}
