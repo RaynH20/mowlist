@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Calendar, Clock, MapPin, Phone, Loader2, CheckCircle,
-  ChevronRight, ExternalLink, Filter, User
+  ChevronRight, ExternalLink, Filter, User, ChevronDown, ChevronUp
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { getProAssignedJobsWithDetails, type ProBookingWithDetails } from '../../lib/proDashboard'
 import { serviceTypeLabel, yardSizeLabel } from '../../lib/labels'
+import JobPhotoGallery from '../../components/JobPhotoGallery'
 
 type StatusFilter = 'all' | 'active' | 'completed'
 
@@ -14,7 +16,9 @@ export default function ProSchedule() {
   const [loading, setLoading] = useState(true)
   const [jobs, setJobs] = useState<ProBookingWithDetails[]>([])
   const [filter, setFilter] = useState<StatusFilter>('all')
-  const [selectedJob, setSelectedJob] = useState<ProBookingWithDetails | null>(null)
+  const [searchParams] = useSearchParams()
+  const urlBookingId = searchParams.get('booking')
+  const [expandedJob, setExpandedJob] = useState<string | null>(urlBookingId)
 
   useEffect(() => {
     if (user) fetchJobs()
@@ -161,21 +165,14 @@ export default function ProSchedule() {
                   <ScheduleRow
                     key={job.id}
                     job={job}
-                    onClick={() => setSelectedJob(job)}
+                    expanded={expandedJob === job.id}
+                    onToggle={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
                   />
                 ))}
               </div>
             </div>
           ))}
         </div>
-      )}
-
-      {/* Detail modal */}
-      {selectedJob && (
-        <JobDetailModal
-          job={selectedJob}
-          onClose={() => setSelectedJob(null)}
-        />
       )}
     </div>
   )
@@ -196,157 +193,76 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
   )
 }
 
-function ScheduleRow({ job, onClick }: { job: ProBookingWithDetails; onClick: () => void }) {
+function ScheduleRow({ job, expanded, onToggle }: { job: ProBookingWithDetails; expanded: boolean; onToggle: () => void }) {
   const status = getStatusBadge(job.booking_status)
   return (
-    <button
-      onClick={onClick}
-      className="w-full bg-white rounded-xl border border-slate-100 p-3 hover:border-slate-200 transition-colors text-left"
-    >
-      <div className="flex items-center gap-3">
-        <div className="text-center w-16 flex-shrink-0">
-          <p className="text-xs text-slate-500">{job.scheduled_time_window?.split(' ')[1] || ''}</p>
-          <p className="text-base font-bold text-slate-900">
-            {job.scheduled_time_window?.split(' ')[0] || '—'}
-          </p>
-        </div>
-        <div className="w-px h-10 bg-slate-200" />
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-slate-900 truncate">
-            {job.customer_name || 'Customer'}
-          </p>
-          <p className="text-xs text-slate-500 truncate flex items-center gap-1 mt-0.5">
-            <MapPin size={11} className="flex-shrink-0" />
-            {job.address_line ? `${job.address_line}, ` : ''}{job.address_city || '—'}, {job.address_state || ''}
-          </p>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs text-slate-400">{serviceTypeLabel(job.service_type)}</span>
-            <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${status.className}`}>
-              {status.label}
-            </span>
-          </div>
-        </div>
-        <div className="text-right flex-shrink-0">
-          <p className="text-sm font-bold text-[#22C55E]">
-            ${(job.provider_payout_amount || 0).toFixed(0)}
-          </p>
-          <ChevronRight size={16} className="text-slate-400 ml-auto mt-1" />
-        </div>
-      </div>
-    </button>
-  )
-}
-
-function JobDetailModal({ job, onClose }: { job: ProBookingWithDetails; onClose: () => void }) {
-  const status = getStatusBadge(job.booking_status)
-  const fullAddress = [job.address_line, job.address_city, job.address_state, job.address_zip]
-    .filter(Boolean).join(', ')
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white p-4 border-b border-slate-100 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">Job Details</h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-slate-100 rounded-lg"
-          >
-            ✕
-          </button>
-        </div>
-
-        <div className="p-5 space-y-4">
-          {/* Status */}
-          <div className="flex items-center justify-between">
-            <span className={`text-sm font-semibold px-3 py-1 rounded-full ${status.className}`}>
-              {status.label}
-            </span>
-            <p className="text-xl font-bold text-[#22C55E]">
-              ${(job.provider_payout_amount || 0).toFixed(2)}
+    <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full p-3 hover:bg-slate-50 transition-colors text-left"
+      >
+        <div className="flex items-center gap-3">
+          <div className="text-center w-16 flex-shrink-0">
+            <p className="text-xs text-slate-500">{job.scheduled_time_window?.split(' ')[1] || ''}</p>
+            <p className="text-base font-bold text-slate-900">
+              {job.scheduled_time_window?.split(' ')[0] || '—'}
             </p>
           </div>
-
-          {/* Customer */}
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Customer</p>
-            <p className="font-medium text-slate-900 flex items-center gap-2">
-              <User size={14} /> {job.customer_name || 'Customer'}
-            </p>
-            {job.customer_phone && (
-              <a href={`tel:${job.customer_phone}`} className="text-sm text-blue-600 hover:underline flex items-center gap-1 mt-1">
-                <Phone size={12} /> {job.customer_phone}
-              </a>
-            )}
-          </div>
-
-          {/* Address */}
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Address</p>
-            <p className="text-sm text-slate-700 flex items-start gap-1">
-              <MapPin size={14} className="mt-0.5 flex-shrink-0" />
-              {fullAddress || 'Address not available'}
-            </p>
-            {fullAddress && (
-              <a
-                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1 mt-2"
-              >
-                <ExternalLink size={12} /> Open in Google Maps
-              </a>
-            )}
-          </div>
-
-          {/* Schedule */}
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">When</p>
-            <p className="text-sm text-slate-700 flex items-center gap-2">
-              <Calendar size={14} />
-              {new Date(job.scheduled_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-            </p>
-            <p className="text-sm text-slate-700 flex items-center gap-2 mt-1">
-              <Clock size={14} />
-              {job.scheduled_time_window || 'Time not set'}
-            </p>
-          </div>
-
-          {/* Service */}
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Service</p>
-            <p className="text-sm text-slate-700">
-              {serviceTypeLabel(job.service_type)} · {yardSizeLabel(job.yard_size_category)}
-            </p>
-            {job.service_frequency && job.service_frequency !== 'one_time' && (
-              <p className="text-xs text-purple-700 bg-purple-50 inline-block px-2 py-0.5 rounded mt-1">
-                🔁 Recurring ({job.service_frequency})
+          <div className="w-px h-10 bg-slate-200" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <p className="font-semibold text-slate-900 truncate">
+                {job.customer_name || 'Customer'}
               </p>
-            )}
-          </div>
-
-          {/* Notes */}
-          {job.notes && (
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Notes</p>
-              <p className="text-sm text-slate-700 bg-amber-50 border border-amber-100 rounded-lg p-3 whitespace-pre-line">
-                {job.notes}
-              </p>
+              <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-medium">
+                {yardSizeLabel(job.yard_size_category)}
+              </span>
             </div>
-          )}
+            <p className="text-xs text-slate-500 truncate flex items-center gap-1 mt-0.5">
+              <MapPin size={11} className="flex-shrink-0" />
+              {job.address_line ? `${job.address_line}, ` : ''}{job.address_city || '—'}, {job.address_state || ''}
+            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-slate-400">{serviceTypeLabel(job.service_type)}</span>
+              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${status.className}`}>
+                {status.label}
+              </span>
+            </div>
+          </div>
+          <div className="text-right flex-shrink-0 flex items-center gap-2">
+            <div>
+              <p className="text-sm font-bold text-[#22C55E]">
+                ${(job.provider_payout_amount || 0).toFixed(0)}
+              </p>
+              <p className="text-xs text-slate-400">earned</p>
+            </div>
+            {expanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+          </div>
         </div>
-
-        <div className="sticky bottom-0 p-4 bg-white border-t border-slate-100">
-          <button
-            onClick={onClose}
-            className="w-full px-4 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium hover:bg-slate-200 transition-colors"
-          >
-            Close
-          </button>
+      </button>
+      {expanded && (
+        <div className="px-4 pb-4 border-t border-slate-100 space-y-3">
+          <div className="grid grid-cols-3 gap-2 text-sm pt-3">
+            <div>
+              <p className="text-xs text-slate-500">Service</p>
+              <p className="font-medium text-slate-900">{serviceTypeLabel(job.service_type)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Yard size</p>
+              <p className="font-medium text-slate-900">{yardSizeLabel(job.yard_size_category)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Your payout</p>
+              <p className="font-medium text-[#22C55E]">${(job.provider_payout_amount || 0).toFixed(2)}</p>
+            </div>
+          </div>
+          <JobPhotoGallery bookingId={job.id} allowUpload={false} compact />
         </div>
-      </div>
+      )}
     </div>
   )
 }
+
 
 function getStatusBadge(status: string): { label: string; className: string } {
   switch (status) {

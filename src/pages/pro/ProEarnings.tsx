@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react'
 import {
   DollarSign, TrendingUp, Calendar, Clock, Loader2, CheckCircle2,
-  AlertCircle, Wallet, ArrowUpRight, MapPin
+  AlertCircle, Wallet, ArrowUpRight, MapPin, ChevronDown, ChevronUp
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { getProEarningsBreakdown, type ProBookingWithDetails } from '../../lib/proDashboard'
-import { serviceTypeLabel } from '../../lib/labels'
+import { serviceTypeLabel, yardSizeLabel } from '../../lib/labels'
+import JobPhotoGallery from '../../components/JobPhotoGallery'
 
 export default function ProEarnings() {
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
+  const [expandedJob, setExpandedJob] = useState<string | null>(null)
   const [earnings, setEarnings] = useState({
     today: 0,
     thisWeek: 0,
@@ -168,27 +170,62 @@ export default function ProEarnings() {
         ) : (
           <div className="divide-y divide-slate-100">
             {earnings.completedJobs.map((job) => (
-              <div key={job.id} className="p-4 flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-900 truncate">
-                    {job.customer_name || 'Customer'}
-                  </p>
-                  <p className="text-xs text-slate-500 truncate flex items-center gap-1 mt-0.5">
-                    <MapPin size={11} />
-                    {job.address_city || '—'}, {job.address_state || ''}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {formatDate(job.completed_at || job.scheduled_date)}
-                    {' · '}
-                    <span>{serviceTypeLabel(job.service_type)}</span>
-                  </p>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <p className="text-base font-bold text-[#22C55E]">
-                    +${(job.provider_payout_amount || 0).toFixed(2)}
-                  </p>
-                  <p className="text-xs text-slate-400">earned</p>
-                </div>
+              <div key={job.id}>
+                <button
+                  onClick={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
+                  className="w-full text-left p-4 flex items-center gap-3 hover:bg-slate-50 transition-colors"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <p className="font-medium text-slate-900 truncate">
+                        {job.customer_name || 'Customer'}
+                      </p>
+                      <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-medium">
+                        {yardSizeLabel(job.yard_size_category)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 truncate flex items-center gap-1 mt-0.5">
+                      <MapPin size={11} />
+                      {job.address_city || '—'}, {job.address_state || ''}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {formatDate(job.completed_at || job.scheduled_date)}
+                      {' · '}
+                      <span>{serviceTypeLabel(job.service_type)}</span>
+                    </p>
+                  </div>
+                  <div className="text-right flex-shrink-0 flex items-center gap-2">
+                    <div>
+                      <p className="text-base font-bold text-[#22C55E]">
+                        +${(job.provider_payout_amount || 0).toFixed(2)}
+                      </p>
+                      <p className="text-xs text-slate-400">earned</p>
+                    </div>
+                    {expandedJob === job.id ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+                  </div>
+                </button>
+                {expandedJob === job.id && (
+                  <div className="px-4 pb-4 bg-slate-50 border-t border-slate-100 space-y-3">
+                    <div className="grid grid-cols-3 gap-2 text-sm pt-3">
+                      <div>
+                        <p className="text-xs text-slate-500">Service</p>
+                        <p className="font-medium text-slate-900">{serviceTypeLabel(job.service_type)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Yard size</p>
+                        <p className="font-medium text-slate-900">{yardSizeLabel(job.yard_size_category)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Your payout</p>
+                        <p className="font-medium text-[#22C55E]">${(job.provider_payout_amount || 0).toFixed(2)}</p>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500 mb-2">Photos you uploaded</p>
+                      <JobPhotoGallery bookingId={job.id} allowUpload={false} compact />
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

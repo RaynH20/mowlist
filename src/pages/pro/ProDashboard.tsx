@@ -170,7 +170,11 @@ export default function ProDashboard() {
           </h2>
           <div className="space-y-3">
             {todaysJobs.map((job) => (
-              <div key={job.id} className="flex items-center justify-between gap-3 p-3 bg-slate-50 rounded-lg">
+              <Link
+                key={job.id}
+                to={`/pro/schedule?booking=${job.id}`}
+                className="flex items-center justify-between gap-3 p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
+              >
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-slate-900 text-sm">
                     {job.customer_name || 'Customer'}
@@ -179,13 +183,11 @@ export default function ProDashboard() {
                     {job.scheduled_time_window || 'Time TBD'} · {job.address_line || 'Address TBD'}
                   </p>
                 </div>
-                <Link
-                  to="/pro/schedule"
-                  className="text-xs text-[#22C55E] font-medium hover:underline"
-                >
-                  View
-                </Link>
-              </div>
+                <span className="text-xs text-[#22C55E] font-medium flex items-center gap-1">
+                  Open
+                  <ArrowRight size={12} />
+                </span>
+              </Link>
             ))}
           </div>
         </div>
