@@ -22,6 +22,7 @@ export default function PaymentMethods() {
   const [cards, setCards] = useState<SavedPaymentMethod[]>([])
   const [defaultCardId, setDefaultCardId] = useState<string | null>(null)
   const [payments, setPayments] = useState<PaymentWithBooking[]>([])
+  const [bookings, setBookings] = useState<any[]>([])
   const [error, setError] = useState<string | null>(null)
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
 
@@ -40,6 +41,7 @@ export default function PaymentMethods() {
 
       // Hydrate payments with their booking details
       const bookings = (bookingsRes.data || []) as Booking[]
+      setBookings(bookings)
       const bookingMap = new Map(bookings.map(b => [b.id, b]))
       const paymentsWithBooking: PaymentWithBooking[] = (payRes.data || []).map(p => {
         const b = bookingMap.get(p.booking_id)
@@ -306,6 +308,66 @@ export default function PaymentMethods() {
           </div>
         )}
       </div>
+
+      {/* ============ Your Bookings (all with payment status) ============ */}
+      {bookings.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-base font-semibold text-slate-900 mb-3">All your bookings</h2>
+          <p className="text-sm text-slate-500 mb-4">
+            Payment status for each booking. Payment is captured when your pro finishes the job.
+          </p>
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+            <div className="divide-y divide-slate-100">
+              {bookings
+                .filter((b: any) => b.booking_status === 'completed' || b.booking_status === 'in_progress' || b.booking_status === 'arrived' || b.booking_status === 'on_the_way' || b.booking_status === 'provider_assigned' || b.booking_status === 'booked')
+                .slice(0, 10)
+                .map((booking: any) => {
+                  const payStatus = booking.payment_status
+                  const isPaid = payStatus === 'captured' || payStatus === 'succeeded'
+                  const isRefunded = payStatus === 'refunded'
+                  const isFailed = payStatus === 'failed'
+                  const amount = booking.estimated_price || 0
+                  const date = booking.scheduled_date ? new Date(booking.scheduled_date) : null
+                  return (
+                    <Link
+                      key={booking.id}
+                      to={`/dashboard/track?booking=${booking.id}`}
+                      className="p-4 flex items-center gap-3 hover:bg-slate-50 transition-colors"
+                    >
+                      <ProAvatar
+                        imageUrl={booking.provider_image_url}
+                        name={booking.provider_name}
+                        size="md"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-slate-900 truncate">
+                          {booking.provider_name || 'Awaiting pro assignment'}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {date ? date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'No date'} · {booking.booking_status.replace('_', ' ')}
+                        </p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-sm font-semibold text-slate-900">${amount.toFixed(2)}</p>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium inline-block mt-0.5 ${
+                          isPaid
+                            ? 'bg-green-100 text-[#16A34A]'
+                            : isRefunded
+                            ? 'bg-amber-100 text-amber-700'
+                            : isFailed
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {payStatus === 'pending' ? 'Payment on completion' : payStatus}
+                        </span>
+                      </div>
+                    </Link>
+                  )
+                })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ============ Security Notice ============ */}
       <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">

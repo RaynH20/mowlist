@@ -7,6 +7,7 @@ import {
 import { useAuth } from '../../lib/auth-context'
 import { getCustomerBookings, getCustomerQuoteRequests } from '../../lib/api'
 import type { Booking, QuoteRequest } from '../../lib/database.types'
+import ProAvatar from '../../components/ProAvatar'
 
 // Friendly labels for the enum values
 const YARD_SIZE_LABELS: Record<string, string> = {
@@ -326,9 +327,16 @@ export default function Dashboard() {
                     </p>
                     <p className="text-xs text-slate-500">{formatDate(booking.scheduled_date)}</p>
                     {(booking as any).provider_name && (
-                      <p className="text-xs text-slate-400 truncate">
-                        Pro: <span className="font-medium text-slate-600">{(booking as any).provider_name}</span>
-                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <ProAvatar
+                          imageUrl={(booking as any).provider_image_url}
+                          name={(booking as any).provider_name}
+                          size="sm"
+                        />
+                        <p className="text-xs text-slate-500 truncate">
+                          <span className="font-medium text-slate-700">{(booking as any).provider_name}</span>
+                        </p>
+                      </div>
                     )}
                   </div>
                   <div className="text-right flex-shrink-0">

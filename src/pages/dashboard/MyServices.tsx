@@ -4,6 +4,7 @@ import { Pause, X, Loader2, AlertCircle, Calendar, Scissors, RefreshCw, FileText
 import { useAuth } from '../../lib/auth-context'
 import { getCustomerBookings, getCustomerQuoteRequests, updateBookingStatus } from '../../lib/api'
 import type { Booking, QuoteRequest } from '../../lib/database.types'
+import ProAvatar from '../../components/ProAvatar'
 
 const YARD_SIZE_LABELS: Record<string, string> = {
   small: 'Small Yard',
@@ -242,11 +243,18 @@ export default function MyServices() {
           </div>
         )}
 
-        {/* Provider name at bottom */}
+        {/* Provider name + avatar at bottom */}
         {booking.provider_name && (
-          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-1.5 text-xs text-slate-500">
-            <User size={12} />
-            <span>Pro: <span className="font-medium text-slate-700">{booking.provider_name}</span></span>
+          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 text-sm">
+            <ProAvatar
+              imageUrl={(booking as any).provider_image_url}
+              name={booking.provider_name}
+              size="md"
+            />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-slate-500">Your pro</p>
+              <p className="font-medium text-slate-900 truncate">{booking.provider_name}</p>
+            </div>
           </div>
         )}
 
