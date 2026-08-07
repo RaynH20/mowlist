@@ -192,7 +192,7 @@ export default function PaymentMethods() {
       {/* ============ Payment Activity ============ */}
       <div className="mb-8">
         <h2 className="text-base font-semibold text-slate-900 mb-3">Payment activity</h2>
-        <p className="text-sm text-slate-500 mb-4">Your past payments and refunds</p>
+        <p className="text-sm text-slate-500 mb-4">Your past payments, refunds, and pending charges</p>
 
         {/* Summary stats */}
         {payments.length > 0 && (
@@ -220,8 +220,17 @@ export default function PaymentMethods() {
             <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-3">
               <Receipt className="text-slate-400" size={20} />
             </div>
-            <p className="text-slate-600">No payment activity yet</p>
-            <p className="text-sm text-slate-400 mt-1">Your transactions will show up here after your first service</p>
+            <p className="text-slate-900 font-medium">No payment activity yet</p>
+            <p className="text-sm text-slate-500 mt-1 max-w-md mx-auto">
+              Under MowList's "pay on completion" model, payment is captured when your pro finishes the job — not when you book.
+              Your first payment will show up here after your first completed service.
+            </p>
+            <Link
+              to="/dashboard/services"
+              className="inline-flex items-center gap-1 text-sm text-[#22C55E] font-medium hover:underline mt-3"
+            >
+              View your upcoming services →
+            </Link>
           </div>
         ) : (
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">

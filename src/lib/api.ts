@@ -174,9 +174,10 @@ export async function getCustomerBookings(customerId: string): Promise<{ data: a
       // Try to fetch provider names. This may fail if RLS doesn't allow it —
       // we silently fall back to "no name" rather than breaking the whole bookings list.
       try {
+        // The provider_profiles table has display_name (not business_name/first_name/last_name)
         const { data: providers, error: pErr } = await supabase
           .from('provider_profiles')
-          .select('id, business_name, first_name, last_name')
+          .select('id, display_name')
           .in('id', providerIds)
 
         if (!pErr && providers) {
@@ -191,8 +192,7 @@ export async function getCustomerBookings(customerId: string): Promise<{ data: a
 
     const hydrated = (data || []).map(b => {
       const provider = b.provider_id ? providerMap.get(b.provider_id) : null
-      const providerName = provider?.business_name
-        || (provider ? `${provider.first_name || ''} ${provider.last_name || ''}`.trim() : null)
+      const providerName = provider?.display_name || null
       return { ...b, provider_name: providerName }
     })
 
