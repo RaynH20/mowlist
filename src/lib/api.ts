@@ -171,11 +171,22 @@ export async function getCustomerBookings(customerId: string): Promise<{ data: a
     let providerMap = new Map<string, { business_name: string; first_name: string; last_name: string }>()
 
     if (providerIds.length > 0) {
-      const { data: providers } = await supabase
-        .from('provider_profiles')
-        .select('id, business_name, first_name, last_name')
-        .in('id', providerIds)
-      providerMap = new Map((providers || []).map(p => [p.id, p]))
+      // Try to fetch provider names. This may fail if RLS doesn't allow it —
+      // we silently fall back to "no name" rather than breaking the whole bookings list.
+      try {
+        const { data: providers, error: pErr } = await supabase
+          .from('provider_profiles')
+          .select('id, business_name, first_name, last_name')
+          .in('id', providerIds)
+
+        if (!pErr && providers) {
+          providerMap = new Map(providers.map(p => [p.id, p]))
+        } else if (pErr) {
+          console.warn('Could not fetch provider names (RLS may be blocking):', pErr.message)
+        }
+      } catch (innerErr) {
+        console.warn('Provider name fetch failed:', innerErr)
+      }
     }
 
     const hydrated = (data || []).map(b => {
@@ -940,37 +951,60 @@ export async function deleteBookingPhoto(photoId: string): Promise<{ error: Erro
 }
 
 /**
- * Get all payments for a customer. Joins through bookings to catch
- * payments where customer_id might be stored differently.
+ * Get all payments for a customer. Tries multiple strategies to find
+ * payments regardless of how customer_id was stored.
  */
 export async function getCustomerPayments(customerId: string): Promise<{ data: Payment[]; error: Error | null }> {
   try {
-    // First get all bookings for this customer
+    // Strategy 1: payments by customer_id
+    const { data: byCustomerId, error: e1 } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: false })
+
+    if (e1) {
+      // Table might not exist
+      if (e1.code === '42P01' || e1.code === 'PGRST205') {
+        return { data: [], error: null }
+      }
+      // If RLS denies, fall through to other strategies
+    }
+
+    // Strategy 2: payments joined through the user's bookings
     const { data: customerBookings, error: bErr } = await supabase
       .from('bookings')
       .select('id')
       .eq('customer_id', customerId)
 
-    if (bErr) throw bErr
+    let bookingPayments: any[] = []
+    if (!bErr && customerBookings && customerBookings.length > 0) {
+      const bookingIds = customerBookings.map(b => b.id)
+      const { data: byBooking, error: e2 } = await supabase
+        .from('payments')
+        .select('*')
+        .in('booking_id', bookingIds)
+        .order('created_at', { ascending: false })
 
-    const bookingIds = (customerBookings || []).map(b => b.id)
+      if (!e2 && byBooking) {
+        bookingPayments = byBooking
+      }
+    }
 
-    // Query payments by both customer_id AND booking_id (in case
-    // either is set but not both)
-    const { data, error } = await supabase
-      .from('payments')
-      .select('*')
-      .or(`customer_id.eq.${customerId},booking_id.in.(${bookingIds.length ? bookingIds.join(',') : 'null'})`)
-      .order('created_at', { ascending: false })
-
-    if (error) throw error
-
-    // Dedupe (in case a payment is matched by both)
+    // Combine and dedupe
+    const allPayments = [...(byCustomerId || []), ...bookingPayments]
     const seen = new Set<string>()
-    const deduped = (data || []).filter(p => {
+    const deduped = allPayments.filter(p => {
       if (seen.has(p.id)) return false
       seen.add(p.id)
       return true
+    })
+
+    // Sort by created_at desc
+    deduped.sort((a, b) => {
+      const aDate = a.created_at ? new Date(a.created_at).getTime() : 0
+      const bDate = b.created_at ? new Date(b.created_at).getTime() : 0
+      return bDate - aDate
     })
 
     return { data: deduped as Payment[], error: null }
