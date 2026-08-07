@@ -138,8 +138,12 @@ function AppRoutes() {
           <Route path="/faq" element={<><Header /><FAQPage /><Footer /></>} />
           <Route path="/contact" element={<><Header /><ContactPage /><Footer /></>} />
           <Route path="/login" element={<><Header /><PublicOnlyRoute><LoginPage /></PublicOnlyRoute><Footer /></>} />
-          <Route path="/login/customer" element={<><Header /><PublicOnlyRoute><CustomerLoginPage /></PublicOnlyRoute><Footer /></>} />
-          <Route path="/login/pro" element={<><Header /><PublicOnlyRoute><ProviderLoginPage /></PublicOnlyRoute><Footer /></>} />
+          {/* Login pages deliberately NOT wrapped in PublicOnlyRoute — a signed-in
+              user (e.g. a pro) visiting /login/customer should be able to see
+              the form and get the "wrong role" error if they try to sign in
+              with their pro credentials on the customer login page. */}
+          <Route path="/login/customer" element={<><Header /><CustomerLoginPage /><Footer /></>} />
+          <Route path="/login/pro" element={<><Header /><ProviderLoginPage /><Footer /></>} />
           <Route path="/signup" element={<><Header /><PublicOnlyRoute><SignupPage /></PublicOnlyRoute><Footer /></>} />
           <Route path="/signup/customer" element={<><Header /><PublicOnlyRoute><CustomerSignupPage /></PublicOnlyRoute><Footer /></>} />
           <Route path="/signup/pro" element={<><Header /><PublicOnlyRoute><ProviderSignupPage /></PublicOnlyRoute><Footer /></>} />
