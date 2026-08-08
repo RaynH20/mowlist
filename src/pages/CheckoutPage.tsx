@@ -217,6 +217,14 @@ function CheckoutForm() {
         // to the confirmation page.
         if (passedFormData && !isPayingExisting) {
           try {
+            // Geocode for live tracking + geofence checks
+            const { geocodeAddress } = await import('../lib/geocode')
+            const geocoded = await geocodeAddress(
+              passedFormData.address,
+              passedFormData.city || '',
+              passedFormData.state || '',
+              passedFormData.zipCode
+            )
             const { data: address } = await createAddress({
               user_id: user.id,
               street_1: passedFormData.address,
@@ -224,7 +232,11 @@ function CheckoutForm() {
               city: passedFormData.city || 'Unknown',
               state: passedFormData.state || 'TX',
               country: 'USA',
-            })
+              latitude: geocoded?.latitude ?? null,
+              longitude: geocoded?.longitude ?? null,
+              geocoded_at: geocoded ? new Date().toISOString() : null,
+              geocode_source: geocoded?.source ?? null,
+            } as any)
             if (address) {
               const sizeMap: Record<string, string> = {
                 small: 'small',

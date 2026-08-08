@@ -16,6 +16,8 @@ import {
 import { serviceTypeLabel, yardSizeLabel } from '../../lib/labels'
 import JobPhotoGallery from '../../components/JobPhotoGallery'
 import AddonBadges from '../../components/AddonBadges'
+import { useProLocation } from '../../hooks/useProLocation'
+import { checkGeofence } from '../../lib/geo'
 
 export default function ProJobs() {
   const { user } = useAuth()
@@ -79,9 +81,9 @@ export default function ProJobs() {
     setOpenQuotes(openQuotes.filter(q => q.id !== quote.id))
   }
 
-  const showToast = (type: 'success' | 'error', message: string) => {
+  const showToast = (type: 'success' | 'error', message: string, durationMs: number = 4000) => {
     setToast({ type, message })
-    setTimeout(() => setToast(null), 4000)
+    setTimeout(() => setToast(null), durationMs)
   }
 
   const handleAccept = async (job: ProBookingWithDetails) => {
@@ -113,6 +115,35 @@ export default function ProJobs() {
 
   const handleProgressUpdate = async (job: ProBookingWithDetails, newStatus: 'on_the_way' | 'arrived' | 'in_progress' | 'completed') => {
     setActionInProgress(job.id)
+    // Geofence check: only when marking complete
+    if (newStatus === 'completed') {
+      // Pull the customer's address coordinates (might be on job.address_* or via the booking's address_id)
+      const customerLat = (job as any).address_latitude
+      const customerLng = (job as any).address_longitude
+      const proLat = (job as any).pro_lat
+      const proLng = (job as any).pro_lng
+      const proPingedAt = (job as any).pro_pinged_at || (lastPingAt ? new Date(lastPingAt).toISOString() : null)
+
+      if (customerLat == null || customerLng == null) {
+        // Address wasn't geocoded (legacy booking). Allow but warn.
+        console.warn('Customer address not geocoded — skipping geofence check for booking', job.id)
+      } else {
+        const geofence = checkGeofence({
+          customerLat,
+          customerLng,
+          proLat,
+          proLng,
+          proPingedAt,
+        })
+        if (!geofence.ok) {
+          setActionInProgress(null)
+          showToast('error', geofence.message, 8000)
+          return
+        }
+        // Optional: log the distance for analytics
+        console.log(`Geofence OK: ${geofence.distanceMeters?.toFixed(0)}m from job site`)
+      }
+    }
     const { error } = await updateBookingProgress(job.id, newStatus)
     setActionInProgress(null)
     if (error) {
@@ -158,6 +189,21 @@ export default function ProJobs() {
   // Filter assigned jobs into active vs done
   const activeAssigned = assignedJobs.filter(j => j.booking_status !== 'completed')
   const completedAssigned = assignedJobs.filter(j => j.booking_status === 'completed')
+
+  // The "active" booking (in service right now) is the one whose status is
+  // on_the_way, arrived, or in_progress. We use this to drive live tracking
+  // and the geofence check.
+  const ACTIVE_STATUSES = ['on_the_way', 'arrived', 'in_progress']
+  const activeBooking = assignedJobs.find(j => ACTIVE_STATUSES.includes(j.booking_status as string))
+  const activeBookingId = activeBooking?.id || null
+
+  // Start live location tracking while there's an active booking
+  const {
+    isTracking: isLocationTracking,
+    permissionGranted: locationPermission,
+    error: locationError,
+    lastPingAt: lastPingAt,
+  } = useProLocation({ bookingId: activeBookingId, intervalMs: 30_000 })
 
   // Stats
   const openJobs = availableJobs.filter(j => isAvailable)
@@ -236,6 +282,61 @@ export default function ProJobs() {
           {isAvailable ? 'Pause' : 'Go online'}
         </button>
       </div>
+
+      {/* Location tracking indicator (only when there's an active booking) */}
+      {activeBookingId && (
+        <div className={`rounded-xl border p-3 mb-6 flex items-start gap-3 ${
+          locationPermission === false
+            ? 'bg-red-50 border-red-200'
+            : isLocationTracking
+            ? 'bg-green-50 border-green-200'
+            : 'bg-amber-50 border-amber-200'
+        }`}>
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+            locationPermission === false
+              ? 'bg-red-500'
+              : isLocationTracking
+              ? 'bg-[#22C55E]'
+              : 'bg-amber-500'
+          }`}>
+            <MapPin className="text-white" size={16} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className={`text-sm font-semibold ${
+              locationPermission === false
+                ? 'text-red-900'
+                : isLocationTracking
+                ? 'text-green-900'
+                : 'text-amber-900'
+            }`}>
+              {locationPermission === false
+                ? 'Location required to mark jobs complete'
+                : isLocationTracking
+                ? 'Live location sharing is on'
+                : 'Waiting for location…'}
+            </p>
+            <p className={`text-xs mt-0.5 ${
+              locationPermission === false
+                ? 'text-red-700'
+                : isLocationTracking
+                ? 'text-green-700'
+                : 'text-amber-700'
+            }`}>
+              {locationPermission === false
+                ? 'Turn on location in your browser to continue. We use it to verify you\'re at the job site.'
+                : isLocationTracking
+                ? 'Your customer can see where you are. We\'ll verify you\'re at the address when you mark complete.'
+                : locationError || 'Please allow location access when prompted.'}
+            </p>
+          </div>
+          {isLocationTracking && (
+            <span className="text-xs text-green-700 font-medium flex-shrink-0 flex items-center gap-1">
+              <span className="w-2 h-2 bg-[#22C55E] rounded-full animate-pulse" />
+              Live
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">

@@ -30,6 +30,10 @@ export interface ProBookingWithDetails {
   address_city: string | null
   address_state: string | null
   address_zip: string | null
+  // Customer's address coordinates (geocoded). Used for the geofence check
+  // when the pro marks a booking complete.
+  address_latitude: number | null
+  address_longitude: number | null
 }
 
 /**
@@ -76,7 +80,7 @@ export async function getAvailableJobsWithDetails(): Promise<{
     // Fetch all addresses in one go
     const { data: addressesData } = await supabase
       .from('addresses')
-      .select('id, street_1, city, state, zip_code')
+      .select('id, street_1, city, state, zip_code, latitude, longitude')
       .in('id', addressIds)
 
     // Build lookup maps
@@ -98,6 +102,9 @@ export async function getAvailableJobsWithDetails(): Promise<{
         address_city: address?.city || null,
         address_state: address?.state || null,
         address_zip: address?.zip_code || null,
+        // Geofence support: customer address coords
+        address_latitude: address?.latitude ?? null,
+        address_longitude: address?.longitude ?? null,
       }
     })
 
@@ -160,7 +167,7 @@ export async function getProAssignedJobsWithDetails(providerId: string): Promise
 
     const { data: addressesData } = await supabase
       .from('addresses')
-      .select('id, street_1, city, state, zip_code')
+      .select('id, street_1, city, state, zip_code, latitude, longitude')
       .in('id', addressIds)
 
     const usersById = new Map((usersData || []).map(u => [u.id, u]))
@@ -180,6 +187,9 @@ export async function getProAssignedJobsWithDetails(providerId: string): Promise
         address_city: address?.city || null,
         address_state: address?.state || null,
         address_zip: address?.zip_code || null,
+        // Geofence support: customer address coords
+        address_latitude: address?.latitude ?? null,
+        address_longitude: address?.longitude ?? null,
       }
     })
 
@@ -289,7 +299,7 @@ export async function getProEarningsBreakdown(providerId: string): Promise<{
         .in('user_id', userIds)
       const { data: addressesData } = await supabase
         .from('addresses')
-        .select('id, street_1, city, state, zip_code')
+        .select('id, street_1, city, state, zip_code, latitude, longitude')
         .in('id', addressIds)
 
       const usersById = new Map((usersData || []).map(u => [u.id, u]))
@@ -309,6 +319,9 @@ export async function getProEarningsBreakdown(providerId: string): Promise<{
           address_city: address?.city || null,
           address_state: address?.state || null,
           address_zip: address?.zip_code || null,
+        // Geofence support: customer address coords
+        address_latitude: address?.latitude ?? null,
+        address_longitude: address?.longitude ?? null,
         })
       }
     }

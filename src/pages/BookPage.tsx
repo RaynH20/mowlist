@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth-context'
 import { supabase } from '../lib/supabase'
 import { createAddress, createBookingRequest, createQuoteRequest, createBooking } from '../lib/api'
 import { ADDON_CATALOG, ADDON_BY_ID, calculateAddonTotal, isAddonAvailableFor } from '../lib/addons'
+import { geocodeAddress } from '../lib/geocode'
 
 export default function BookPage() {
   const [searchParams] = useSearchParams()
@@ -358,7 +359,17 @@ export default function BookPage() {
           addressId = existingAddress.id
           console.log('Using existing address:', addressId)
         } else {
-          // Create new address
+          // Geocode the address (for live tracking + geofence checks).
+          // We try to geocode, but if it fails we still create the address —
+          // better to let the booking proceed than block on a third-party API.
+          const geocoded = await geocodeAddress(
+            formData.address,
+            formData.city || '',
+            formData.state || '',
+            formData.zipCode
+          )
+
+          // Create new address (with lat/lng if geocoding succeeded)
           const { data: address, error: addressError } = await createAddress({
             user_id: user.id,
             street_1: formData.address,
@@ -366,7 +377,11 @@ export default function BookPage() {
             city: formData.city || 'Unknown',
             state: formData.state || 'Unknown',
             country: 'USA',
-          })
+            latitude: geocoded?.latitude ?? null,
+            longitude: geocoded?.longitude ?? null,
+            geocoded_at: geocoded ? new Date().toISOString() : null,
+            geocode_source: geocoded?.source ?? null,
+          } as any)
 
           if (addressError) {
             console.error('Address save error details:', addressError)
