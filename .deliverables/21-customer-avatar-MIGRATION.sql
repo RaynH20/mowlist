@@ -9,7 +9,13 @@ ALTER TABLE customer_profiles
 
 -- Customer avatars in the same bucket as job photos
 -- (reuse 'avatars' folder, public read, owner can write/update)
-CREATE POLICY IF NOT EXISTS "Customers can upload their own avatar"
+--
+-- Drop existing policies first (idempotent — running this twice is safe)
+DROP POLICY IF EXISTS "Customers can upload their own avatar" ON storage.objects;
+DROP POLICY IF EXISTS "Customers can update their own avatar" ON storage.objects;
+DROP POLICY IF EXISTS "Customers can delete their own avatar" ON storage.objects;
+
+CREATE POLICY "Customers can upload their own avatar"
   ON storage.objects FOR INSERT
   TO authenticated
   WITH CHECK (
@@ -18,7 +24,7 @@ CREATE POLICY IF NOT EXISTS "Customers can upload their own avatar"
     AND (storage.foldername(name))[2] = (SELECT auth.uid()::text)
   );
 
-CREATE POLICY IF NOT EXISTS "Customers can update their own avatar"
+CREATE POLICY "Customers can update their own avatar"
   ON storage.objects FOR UPDATE
   TO authenticated
   USING (
@@ -27,7 +33,7 @@ CREATE POLICY IF NOT EXISTS "Customers can update their own avatar"
     AND (storage.foldername(name))[2] = (SELECT auth.uid()::text)
   );
 
-CREATE POLICY IF NOT EXISTS "Customers can delete their own avatar"
+CREATE POLICY "Customers can delete their own avatar"
   ON storage.objects FOR DELETE
   TO authenticated
   USING (
