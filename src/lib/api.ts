@@ -369,7 +369,8 @@ export async function uploadJobPhoto(
       // Don't fail the whole upload if this insert fails (table may not exist yet)
       await supabase.from('booking_photos').insert({
         booking_id: bookingId,
-        photo_type: photoType,
+        photo_role: photoType,
+        addon_id: null,
         photo_url: url,
         uploaded_by: user.id,
       }).then(({ error: insErr }) => {
@@ -1324,5 +1325,173 @@ export async function isFavorited(
     return { isFavorited: !!data, favoriteId: data?.id || null }
   } catch (error) {
     return { isFavorited: false, favoriteId: null }
+  }
+}
+
+// ============================================
+// ESCROW 24-HOUR REVIEW WINDOW
+// ============================================
+
+export interface EscrowSummary {
+  booking_id: string
+  ready_for_review_at: string | null
+  auto_capture_at: string | null
+  reviewed_at: string | null
+  customer_approved_at: string | null
+  payment_captured_at: string | null
+  hours_until_auto_capture: number
+  is_in_review_window: boolean
+}
+
+/**
+ * Get escrow timing info for a booking.
+ * Returns hours remaining in the 24h review window, or null if not in review.
+ */
+export async function getEscrowStatus(
+  bookingId: string
+): Promise<{ data: EscrowSummary | null; error: Error | null }> {
+  try {
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('id, booking_status, ready_for_review_at, auto_capture_at, reviewed_at, customer_approved_at, payment_captured_at')
+      .eq('id', bookingId)
+      .maybeSingle()
+
+    if (error) throw error
+    if (!data) return { data: null, error: null }
+
+    const isInReview = data.booking_status === 'pending_review'
+    const hoursUntil = isInReview && data.auto_capture_at
+      ? Math.max(0, (new Date(data.auto_capture_at).getTime() - Date.now()) / 3_600_000)
+      : 0
+
+    return {
+      data: {
+        booking_id: data.id,
+        ready_for_review_at: data.ready_for_review_at,
+        auto_capture_at: data.auto_capture_at,
+        reviewed_at: data.reviewed_at,
+        customer_approved_at: data.customer_approved_at,
+        payment_captured_at: data.payment_captured_at,
+        hours_until_auto_capture: hoursUntil,
+        is_in_review_window: isInReview,
+      },
+      error: null,
+    }
+  } catch (err) {
+    return { data: null, error: err as Error }
+  }
+}
+
+/**
+ * Customer approves the job. Triggers immediate payment capture.
+ * Sets customer_approved_at + status = 'completed' + payment_status = 'captured'.
+ */
+export async function customerApproveBooking(
+  bookingId: string
+): Promise<{ error: Error | null }> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: new Error('Not signed in') }
+
+    // Verify the booking belongs to this customer
+    const { data: booking, error: bErr } = await supabase
+      .from('bookings')
+      .select('customer_id, booking_status, payment_status')
+      .eq('id', bookingId)
+      .single()
+
+    if (bErr) throw bErr
+    if (booking?.customer_id !== user.id) {
+      return { error: new Error('Not your booking') }
+    }
+    if (booking.booking_status !== 'pending_review') {
+      return { error: new Error('Booking is not awaiting review') }
+    }
+
+    // Mark approved
+    const { error } = await supabase
+      .from('bookings')
+      .update({
+        customer_approved_at: new Date().toISOString(),
+        reviewed_at: new Date().toISOString(),
+        booking_status: 'completed',
+        payment_status: 'captured',
+        payment_captured_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', bookingId)
+
+    if (error) throw error
+    return { error: null }
+  } catch (err) {
+    return { error: err as Error }
+  }
+}
+
+/**
+ * Customer disputes the job. Holds payment in escrow pending admin review.
+ */
+export async function customerDisputeBooking(
+  bookingId: string,
+  reason: string
+): Promise<{ error: Error | null }> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: new Error('Not signed in') }
+
+    const trimmed = reason.trim()
+    if (trimmed.length < 10) {
+      return { error: new Error('Please describe the issue (at least 10 characters)') }
+    }
+
+    const { data: booking, error: bErr } = await supabase
+      .from('bookings')
+      .select('customer_id, booking_status')
+      .eq('id', bookingId)
+      .single()
+
+    if (bErr) throw bErr
+    if (booking?.customer_id !== user.id) {
+      return { error: new Error('Not your booking') }
+    }
+    if (booking.booking_status !== 'pending_review') {
+      return { error: new Error('Can only dispute bookings in review') }
+    }
+
+    const { error } = await supabase
+      .from('bookings')
+      .update({
+        booking_status: 'disputed',
+        reviewed_at: new Date().toISOString(),
+        notes: trimmed,  // append dispute reason to notes
+      })
+      .eq('id', bookingId)
+
+    if (error) throw error
+    return { error: null }
+  } catch (err) {
+    return { error: err as Error }
+  }
+}
+
+/**
+ * Mark the booking as 'reviewed' (customer opened the review screen).
+ * Used for analytics — doesn't change the actual status.
+ */
+export async function markBookingAsReviewed(
+  bookingId: string
+): Promise<{ error: Error | null }> {
+  try {
+    const { error } = await supabase
+      .from('bookings')
+      .update({ reviewed_at: new Date().toISOString() })
+      .eq('id', bookingId)
+      .is('reviewed_at', null)  // only set once
+
+    if (error) throw error
+    return { error: null }
+  } catch (err) {
+    return { error: err as Error }
   }
 }

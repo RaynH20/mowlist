@@ -117,7 +117,7 @@ export interface QuoteRequestImage {
   created_at: string
 }
 
-export type BookingStatus = 'requested' | 'booked' | 'provider_assigned' | 'on_the_way' | 'arrived' | 'in_progress' | 'completed' | 'cancelled' | 'disputed' | 'refunded'
+export type BookingStatus = 'requested' | 'booked' | 'provider_assigned' | 'on_the_way' | 'arrived' | 'in_progress' | 'mowing' | 'pending_review' | 'completed' | 'cancelled' | 'disputed' | 'refunded'
 export type PaymentStatus = 'pending' | 'authorized' | 'captured' | 'failed' | 'refunded' | 'partially_refunded'
 
 export interface Booking {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   Calendar, Clock, MapPin, Phone, Loader2, CheckCircle,
   ChevronRight, ExternalLink, Filter, User, ChevronDown, ChevronUp
@@ -257,6 +257,15 @@ function ScheduleRow({ job, expanded, onToggle }: { job: ProBookingWithDetails; 
             </div>
           </div>
           <JobPhotoGallery bookingId={job.id} allowUpload={false} compact />
+          {/* Active jobs need photos + Mark Ready — link to ProJobs for that */}
+          {['on_the_way', 'arrived', 'in_progress', 'pending_review'].includes(job.booking_status) && (
+            <Link
+              to="/pro/jobs"
+              className="inline-flex items-center gap-1.5 text-sm text-[#22C55E] font-semibold hover:underline"
+            >
+              {job.booking_status === 'pending_review' ? 'View review status' : 'Manage photos & mark ready →'}
+            </Link>
+          )}
         </div>
       )}
     </div>
@@ -274,6 +283,8 @@ function getStatusBadge(status: string): { label: string; className: string } {
       return { label: 'Arrived', className: 'bg-amber-100 text-amber-700' }
     case 'in_progress':
       return { label: 'In progress', className: 'bg-purple-100 text-purple-700' }
+    case 'pending_review':
+      return { label: 'Awaiting review', className: 'bg-amber-100 text-amber-700' }
     case 'completed':
       return { label: 'Completed', className: 'bg-slate-200 text-slate-700' }
     default:

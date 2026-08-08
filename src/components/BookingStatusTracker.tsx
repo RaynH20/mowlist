@@ -1,9 +1,10 @@
-import { CheckCircle, Clock, Truck, MapPin, Scissors, Award, XCircle, AlertCircle, Camera, MapPinned } from 'lucide-react'
+import { CheckCircle, Clock, Truck, MapPin, Scissors, Award, XCircle, AlertCircle, Camera, MapPinned, ImageIcon, Check, Timer, Shield, AlertTriangle, ThumbsUp, ThumbsDown, Sparkles } from 'lucide-react'
 import type { BookingStatus, Address } from '../lib/database.types'
 import LiveTrackingMap from './LiveTrackingMap'
 import ErrorBoundary from './ErrorBoundary'
 import JobPhotoGallery from './JobPhotoGallery'
 import AddonBadges from './AddonBadges'
+import { hydrateAddons } from '../lib/addons'
 
 interface StatusStep {
   id: BookingStatus
@@ -18,6 +19,7 @@ const STATUS_FLOW: StatusStep[] = [
   { id: 'on_the_way', label: 'On the way', description: 'Pro is heading to you', icon: Truck },
   { id: 'arrived', label: 'Arrived', description: 'Pro is on site', icon: MapPin },
   { id: 'in_progress', label: 'Mowing', description: 'Service in progress', icon: Scissors },
+  { id: 'pending_review', label: 'Awaiting Review', description: 'Pro done — your turn to review', icon: Shield },
   { id: 'completed', label: 'Completed', description: 'Job done — enjoy your lawn!', icon: Award },
 ]
 
@@ -29,7 +31,8 @@ function getStatusIndex(status: BookingStatus): number {
   if (status === 'refunded') return -1
   if (status === 'provider_assigned') return 1 // treat same as "booked"
   if (status === 'in_progress') return 4
-  if (status === 'completed') return 5
+  if (status === 'pending_review') return 5
+  if (status === 'completed') return 6
   return STATUS_FLOW.findIndex(s => s.id === status)
 }
 
@@ -119,9 +122,44 @@ export default function BookingStatusTracker({
 
       {/* Add-ons the customer selected (lawn mowing only) */}
       {Array.isArray(selectedAddons) && selectedAddons.length > 0 && (
-        <div>
+        <div className="space-y-3">
           <p className="text-xs text-slate-500 mb-1.5">Add-ons for this job</p>
           <AddonBadges selectedAddons={selectedAddons} variant="chips" />
+
+          {/* Per-addon progress: shows when the pro has done each one. Once
+              the booking is past 'in_progress', the customer can see which
+              addons have been completed (and have photos) vs which are still
+              pending review. */}
+          {(['pending_review', 'completed'].includes(status as string)) && (
+            <div className="bg-slate-50 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-medium text-slate-700">What was done</p>
+              <div className="space-y-1.5">
+                {/* Base mowing row */}
+                <div className="flex items-center gap-2 text-xs">
+                  {beforePhotoUrl && afterPhotoUrl ? (
+                    <CheckCircle className="text-emerald-500 flex-shrink-0" size={14} />
+                  ) : (
+                    <AlertCircle className="text-amber-500 flex-shrink-0" size={14} />
+                  )}
+                  <Scissors size={12} className="text-slate-400 flex-shrink-0" />
+                  <span className="text-slate-700">Lawn Mowing</span>
+                  <span className="text-slate-400 ml-auto">Before + After</span>
+                </div>
+                {hydrateAddons(selectedAddons).map((addon) => (
+                  <div key={addon.id} className="flex items-center gap-2 text-xs">
+                    {beforePhotoUrl && afterPhotoUrl ? (
+                      <CheckCircle className="text-emerald-500 flex-shrink-0" size={14} />
+                    ) : (
+                      <AlertCircle className="text-amber-500 flex-shrink-0" size={14} />
+                    )}
+                    <span className="flex-shrink-0">{addon.icon}</span>
+                    <span className="text-slate-700">{addon.name}</span>
+                    <span className="text-slate-400 ml-auto">Before + After</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

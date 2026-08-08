@@ -51,6 +51,7 @@ export const BOOKING_STATUS_LABELS: Record<string, string> = {
   arrived: 'On site',
   in_progress: 'Mowing',
   mowing: 'Mowing',
+  pending_review: 'Awaiting review',
   completed: 'Completed',
   cancelled: 'Cancelled',
   disputed: 'Disputed',

@@ -139,6 +139,11 @@ serve(async (req) => {
     params.append('amount', amountInCents.toString())
     params.append('currency', 'usd')
     params.append('customer', stripeCustomerId)
+    // Manual capture: the customer's card is AUTHORIZED at booking time
+    // but the charge isn't captured until the pro finishes the job AND
+    // the customer approves (or the 24h window expires).
+    // See capture-payment edge function for the actual capture.
+    params.append('capture_method', 'manual')
     params.append('automatic_payment_methods[enabled]', 'true')
 
     if (payment_method_id) {

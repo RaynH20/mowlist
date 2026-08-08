@@ -455,18 +455,32 @@ export async function removeProSkill(
 
 /**
  * Mark a booking as in-progress or completed by the pro.
+ *
+ * When newStatus === 'completed' (or new 'pending_review'), the booking
+ * transitions into the 24h escrow review window. We set:
+ *   - ready_for_review_at = now()
+ *   - auto_capture_at = now() + 24 hours
+ *   - status = 'pending_review' (NOT 'completed' — customer hasn't approved yet)
  */
 export async function updateBookingProgress(
   bookingId: string,
-  newStatus: 'on_the_way' | 'arrived' | 'in_progress' | 'completed'
+  newStatus: 'on_the_way' | 'arrived' | 'in_progress' | 'completed' | 'pending_review'
 ): Promise<{ error: Error | null }> {
   try {
+    const now = new Date()
     const updates: any = {
       booking_status: newStatus,
-      updated_at: new Date().toISOString(),
+      updated_at: now.toISOString(),
     }
+
     if (newStatus === 'completed') {
-      updates.completed_at = new Date().toISOString()
+      // Legacy path — pro tapped "complete" without going through review window
+      updates.completed_at = now.toISOString()
+    } else if (newStatus === 'pending_review') {
+      // Pro marked the job done — start the 24h review window
+      updates.ready_for_review_at = now.toISOString()
+      updates.auto_capture_at = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
+      // Don't set completed_at yet — that happens when customer approves
     }
 
     const { error: bookingErr } = await supabase
@@ -485,5 +499,89 @@ export async function updateBookingProgress(
     return { error: null }
   } catch (error) {
     return { error: error as Error }
+  }
+}
+
+/**
+ * Pro marks the job as ready for customer review.
+ * Equivalent to updateBookingProgress(bookingId, 'pending_review') but
+ * validates that all required photos are uploaded first.
+ *
+ * Required photos:
+ *   - 1 BEFORE + 1 AFTER for the base mowing (booking.before_photo_url + after_photo_url)
+ *   - 1 BEFORE + 1 AFTER for EACH addon in booking.selected_addons
+ */
+export async function markReadyForReview(
+  bookingId: string
+): Promise<{ error: Error | null; missing?: string[] }> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: new Error('Not signed in') }
+
+    // Get the booking with its photos
+    const { data: booking, error: bErr } = await supabase
+      .from('bookings')
+      .select('id, provider_id, before_photo_url, after_photo_url, selected_addons, booking_status')
+      .eq('id', bookingId)
+      .single()
+
+    if (bErr) throw bErr
+    if (!booking) return { error: new Error('Booking not found') }
+
+    // Verify pro owns it
+    const { data: provider } = await supabase
+      .from('provider_profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!provider || (booking as any).provider_id !== provider.id) {
+      return { error: new Error('Not your booking') }
+    }
+
+    if (booking.booking_status === 'pending_review') {
+      return { error: new Error('Already pending review') }
+    }
+    if (booking.booking_status === 'completed') {
+      return { error: new Error('Already completed') }
+    }
+
+    // Validate photos
+    const missing: string[] = []
+    if (!booking.before_photo_url) missing.push('Before photo of lawn')
+    if (!booking.after_photo_url) missing.push('After photo of lawn')
+
+    // Check per-addon photos
+    const selectedAddons = (booking.selected_addons as any[]) || []
+    if (selectedAddons.length > 0) {
+      // Fetch all photos for this booking
+      const { data: photos, error: pErr } = await supabase
+        .from('booking_photos')
+        .select('addon_id, photo_role')
+        .eq('booking_id', bookingId)
+
+      if (pErr) throw pErr
+
+      for (const addon of selectedAddons) {
+        const hasBefore = (photos || []).some(
+          (p: any) => p.addon_id === addon.id && p.photo_role === 'before'
+        )
+        const hasAfter = (photos || []).some(
+          (p: any) => p.addon_id === addon.id && p.photo_role === 'after'
+        )
+        if (!hasBefore) missing.push(`Before photo of ${addon.name}`)
+        if (!hasAfter) missing.push(`After photo of ${addon.name}`)
+      }
+    }
+
+    if (missing.length > 0) {
+      return { error: new Error('Missing required photos'), missing }
+    }
+
+    // All good — transition to pending_review
+    const result = await updateBookingProgress(bookingId, 'pending_review')
+    return result
+  } catch (err) {
+    return { error: err as Error }
   }
 }

@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom'
 import {
   MapPin, Clock, DollarSign, Check, X, Briefcase, Calendar,
   CheckCircle, ChevronDown, ChevronUp, RefreshCw, Phone, AlertCircle,
-  User, Mail, Loader2, ExternalLink, CreditCard, Camera, Image as ImageIcon, FileText
+  User, Mail, Loader2, ExternalLink, CreditCard, Camera, Image as ImageIcon, FileText,
+  Shield, Upload
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { acceptJob, declineJob, updateProviderProfile, getProviderProfile, uploadJobPhoto, getPendingQuoteRequests, updateQuoteRequest } from '../../lib/api'
@@ -11,6 +12,7 @@ import {
   getAvailableJobsWithDetails,
   getProAssignedJobsWithDetails,
   updateBookingProgress,
+  markReadyForReview,
   type ProBookingWithDetails
 } from '../../lib/proDashboard'
 import { serviceTypeLabel, yardSizeLabel } from '../../lib/labels'
@@ -159,6 +161,26 @@ export default function ProJobs() {
     showToast('success', label)
     setAssignedJobs(
       assignedJobs.map(j => (j.id === job.id ? { ...j, booking_status: newStatus, completed_at: newStatus === 'completed' ? new Date().toISOString() : j.completed_at } : j))
+    )
+  }
+
+  // Pro marks the job as done — validates all required photos are uploaded
+  // and transitions to 'pending_review' (24h customer escrow window).
+  const handleMarkReadyForReview = async (job: ProBookingWithDetails) => {
+    setActionInProgress(job.id)
+    const { error, missing } = await markReadyForReview(job.id)
+    setActionInProgress(null)
+    if (error) {
+      if (missing && missing.length > 0) {
+        showToast('error', `Missing photos: ${missing.join(', ')}`, 10000)
+      } else {
+        showToast('error', error.message, 8000)
+      }
+      return
+    }
+    showToast('success', 'Marked ready for review! Customer has 24h to approve.', 6000)
+    setAssignedJobs(
+      assignedJobs.map(j => (j.id === job.id ? { ...j, booking_status: 'pending_review' as const } : j))
     )
   }
 
@@ -402,6 +424,7 @@ export default function ProJobs() {
                 expanded={expandedJob === job.id}
                 onToggle={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
                 onUpdate={handleProgressUpdate}
+                onMarkReadyForReview={handleMarkReadyForReview}
                 actionInProgress={actionInProgress === job.id}
                 formatDate={formatDate}
                 formatAddress={formatAddress}
@@ -797,12 +820,13 @@ function AvailableJobCard({
 }
 
 function AssignedJobCard({
-  job, expanded, onToggle, onUpdate, actionInProgress, formatDate, formatAddress,
+  job, expanded, onToggle, onUpdate, onMarkReadyForReview, actionInProgress, formatDate, formatAddress,
 }: {
   job: ProBookingWithDetails
   expanded: boolean
   onToggle: () => void
   onUpdate: (job: ProBookingWithDetails, status: 'on_the_way' | 'arrived' | 'in_progress' | 'completed') => void
+  onMarkReadyForReview: (job: ProBookingWithDetails) => void
   actionInProgress: boolean
   formatDate: (d: string | null) => string
   formatAddress: (j: ProBookingWithDetails) => string
@@ -1032,6 +1056,44 @@ function AssignedJobCard({
               </button>
             )}
           </>
+        )}
+
+        {/* Mark Ready for Review — shown when in_progress + photos uploaded */}
+        {job.booking_status === 'in_progress' && job.after_photo_url && !requiresAfterPhoto && photoMode === 'none' && (
+          <div className="border-t border-slate-200 pt-3 mt-3">
+            <p className="text-xs text-slate-500 mb-2">
+              Photos uploaded. Mark the job as done when all addons are complete.
+            </p>
+            <button
+              onClick={() => onMarkReadyForReview(job)}
+              disabled={actionInProgress}
+              className="w-full bg-gradient-to-r from-emerald-500 to-[#22C55E] text-white py-3 rounded-xl font-semibold hover:from-emerald-600 hover:to-[#16A34A] transition-colors flex items-center justify-center gap-2 disabled:opacity-50 shadow-md"
+            >
+              {actionInProgress ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <Shield size={18} />
+              )}
+              Mark Ready for Customer Review
+            </button>
+          </div>
+        )}
+
+        {/* Pending review banner — when in the 24h window */}
+        {job.booking_status === 'pending_review' && (
+          <div className="border-t border-slate-200 pt-3 mt-3">
+            <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-3 flex items-center gap-3">
+              <div className="w-9 h-9 bg-amber-500 rounded-full flex items-center justify-center flex-shrink-0">
+                <Shield className="text-white" size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-amber-900 text-sm">Awaiting customer review</p>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  Customer has 24h to approve. Payment auto-releases if they don't act.
+                </p>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>
