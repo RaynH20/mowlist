@@ -6,6 +6,7 @@ import { ChevronLeft, CreditCard, Lock, Shield, AlertCircle, Loader2, Trash2, Ch
 import { useAuth } from '../lib/auth-context'
 import { supabase } from '../lib/supabase'
 import { createAddress, createBooking } from '../lib/api'
+import { geocodeAddress } from '../lib/geocode'
 import {
   createPaymentIntent,
   listPaymentMethods,
@@ -218,7 +219,6 @@ function CheckoutForm() {
         if (passedFormData && !isPayingExisting) {
           try {
             // Geocode for live tracking + geofence checks
-            const { geocodeAddress } = await import('../lib/geocode')
             const geocoded = await geocodeAddress(
               passedFormData.address,
               passedFormData.city || '',

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
-import { Check, ChevronRight, MapPin, Calendar, CreditCard, Clock, Home, RefreshCw, Star, Shield, Lock, Upload, X, Phone, Mail, MessageSquare, AlertCircle, Plus } from 'lucide-react'
+import { Check, ChevronRight, MapPin, Calendar, CreditCard, Clock, Home, RefreshCw, Star, Shield, Lock, Upload, X, Phone, Mail, MessageSquare, AlertCircle, Plus, Heart } from 'lucide-react'
 import { useAuth } from '../lib/auth-context'
 import { supabase } from '../lib/supabase'
 import { createAddress, createBookingRequest, createQuoteRequest, createBooking } from '../lib/api'
 import { ADDON_CATALOG, ADDON_BY_ID, calculateAddonTotal, isAddonAvailableFor } from '../lib/addons'
 import { geocodeAddress } from '../lib/geocode'
+import { getCustomerFavorites, type Favorite } from '../lib/api'
 
 export default function BookPage() {
   const [searchParams] = useSearchParams()
@@ -23,6 +24,10 @@ export default function BookPage() {
   } | null>(null)
   const [addressMode, setAddressMode] = useState<'confirm' | 'edit' | 'new'>('confirm')
   const [useExistingAddress, setUseExistingAddress] = useState(false)
+
+  // Favorited pros (shown at top of /book for returning customers)
+  const [favorites, setFavorites] = useState<Favorite[]>([])
+  const [selectedFavoriteId, setSelectedFavoriteId] = useState<string | null>(null)
 
   // Load saved default address on mount
   useEffect(() => {
@@ -65,6 +70,17 @@ export default function BookPage() {
     if (user?.id) {
       loadSavedAddress()
     }
+  }, [user?.id])
+
+  // Load customer's favorited pros (for "Use a pro you've used before")
+  useEffect(() => {
+    if (!user?.id) return
+    let cancelled = false
+    getCustomerFavorites(user.id).then((res) => {
+      if (cancelled) return
+      if (!res.error) setFavorites(res.data || [])
+    })
+    return () => { cancelled = true }
   }, [user?.id])
 
   // Load customer profile (name + phone) so we can prefill the custom quote contact info
@@ -464,6 +480,22 @@ export default function BookPage() {
         // Create the booking with status 'requested' — we'll wait for a pro
         // to accept before the customer pays (so the payment can be routed
         // directly to the pro's Stripe Connect account).
+        //
+        // If the customer picked a favorite pro at the top, pre-assign them
+        // so the booking goes directly to that pro (skipping the marketplace).
+        // Status becomes 'provider_assigned' instead of 'requested' so the
+        // pro sees it as a returning customer request.
+        let assignedProviderId: string | null = null
+        if (selectedFavoriteId) {
+          // Look up the pro's provider_profiles.id from the public id
+          const { data: provider } = await supabase
+            .from('provider_profiles')
+            .select('id')
+            .eq('id', selectedFavoriteId)
+            .maybeSingle()
+          assignedProviderId = provider?.id || null
+        }
+
         const { data: newBooking, error: bookingCreateError } = await createBooking({
           customer_id: user.id,
           address_id: addressId,
@@ -473,9 +505,10 @@ export default function BookPage() {
           scheduled_date: formData.date || null,
           scheduled_time_window: formData.time || null,
           estimated_price: calculatePrice(),
-          booking_status: 'requested',
+          booking_status: assignedProviderId ? 'provider_assigned' : 'requested',
           payment_status: 'pending',
           selected_addons: formData.selectedAddons,
+          provider_id: assignedProviderId,  // null for marketplace, set for favorite
         } as any)
 
         if (bookingCreateError || !newBooking) {
@@ -576,6 +609,73 @@ export default function BookPage() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 sm:p-6">
+          {/* Favorited pros — show at top of step 1 (only if any exist) */}
+          {step === 1 && favorites.length > 0 && (
+            <div className="mb-4 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2 mb-1">
+                <Heart size={16} className="fill-red-500 text-red-500" />
+                <h3 className="text-sm font-semibold text-slate-900">Use a pro you've used before</h3>
+              </div>
+              <p className="text-xs text-slate-500 mb-3">
+                Pick a saved pro to skip the marketplace. They get first dibs.
+              </p>
+              <div className="space-y-2">
+                {favorites.slice(0, 3).map((fav) => {
+                  const p = (fav as any).provider
+                  if (!p) return null
+                  const isSelected = selectedFavoriteId === p.id
+                  return (
+                    <button
+                      key={fav.id}
+                      onClick={() => {
+                        // Toggle: if already selected, clear; otherwise set
+                        setSelectedFavoriteId(isSelected ? null : p.id)
+                      }}
+                      className={`w-full text-left p-3 rounded-lg border-2 transition-colors flex items-center gap-3 ${
+                        isSelected
+                          ? 'border-[#22C55E] bg-green-50'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
+                      {p.profile_image_url ? (
+                        <img src={p.profile_image_url} alt={p.display_name || 'Pro'} className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#22C55E] to-[#1E40AF] text-white font-semibold flex items-center justify-center text-sm flex-shrink-0">
+                          {(p.display_name || '?').charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-slate-900 text-sm truncate">
+                          {p.display_name || 'Pro'}
+                        </p>
+                        <div className="flex items-center gap-1 text-xs text-slate-500">
+                          <span className="text-amber-500">★</span>
+                          <span>{p.average_rating ? Number(p.average_rating).toFixed(1) : 'New'}</span>
+                          {p.review_count > 0 && <span>({p.review_count})</span>}
+                        </div>
+                      </div>
+                      <span className={`text-xs font-medium flex-shrink-0 ${
+                        isSelected ? 'text-[#22C55E]' : 'text-slate-400'
+                      }`}>
+                        {isSelected ? '✓ Selected' : 'Use'}
+                      </span>
+                    </button>
+                  )
+                })}
+                <button
+                  onClick={() => setSelectedFavoriteId(null)}
+                  className={`w-full text-left p-2 rounded-lg text-xs text-center transition-colors ${
+                    selectedFavoriteId === null
+                      ? 'bg-slate-100 text-slate-700 font-medium'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  Or find a new pro in the marketplace
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Step 1: Address - Show confirmation if saved address exists */}
           {step === 1 && (
             <div>

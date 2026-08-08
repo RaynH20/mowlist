@@ -1014,3 +1014,315 @@ export async function getCustomerPayments(customerId: string): Promise<{ data: P
     return { data: [], error: error as Error }
   }
 }
+
+// ============================================
+// REVIEWS (Phase 1 Quality Control)
+// ============================================
+
+export interface Review {
+  id: string
+  booking_id: string
+  customer_id: string
+  provider_id: string
+  rating: number
+  comment: string | null
+  dispute_status: 'none' | 'disputed' | 'upheld' | 'rejected'
+  dispute_reason: string | null
+  pro_rating_of_customer: number | null
+  pro_private_feedback: string | null
+  created_at: string
+  updated_at: string
+  // Hydrated fields (when joined)
+  customer_name?: string | null
+  customer_avatar_url?: string | null
+}
+
+/**
+ * Submit a review for a completed booking.
+ * One review per booking — calling this twice for the same booking will update.
+ */
+export async function submitReview(
+  bookingId: string,
+  rating: number,
+  comment: string | null = null
+): Promise<{ data: Review | null; error: Error | null }> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { data: null, error: new Error('Not signed in') }
+
+    // Look up the booking to get provider_id
+    const { data: booking, error: bErr } = await supabase
+      .from('bookings')
+      .select('id, provider_id, customer_id, booking_status')
+      .eq('id', bookingId)
+      .single()
+
+    if (bErr || !booking) {
+      return { data: null, error: new Error('Booking not found') }
+    }
+    if (booking.customer_id !== user.id) {
+      return { data: null, error: new Error('Not your booking') }
+    }
+    if (booking.booking_status !== 'completed') {
+      return { data: null, error: new Error('Can only review completed bookings') }
+    }
+    if (!booking.provider_id) {
+      return { data: null, error: new Error('No pro assigned to this booking') }
+    }
+    if (rating < 1 || rating > 5) {
+      return { data: null, error: new Error('Rating must be between 1 and 5') }
+    }
+
+    // Upsert (one review per booking, but allow editing)
+    const { data, error } = await supabase
+      .from('reviews')
+      .upsert({
+        booking_id: bookingId,
+        customer_id: user.id,
+        provider_id: booking.provider_id,
+        rating,
+        comment: comment?.trim() || null,
+      }, {
+        onConflict: 'booking_id',
+      })
+      .select()
+      .single()
+
+    if (error) throw error
+    return { data, error: null }
+  } catch (error) {
+    return { data: null, error: error as Error }
+  }
+}
+
+/**
+ * Get all reviews for a provider, with hydrated customer name/avatar.
+ * Excludes reviews in 'upheld' status (where pro won a dispute).
+ */
+export async function getReviewsForProvider(
+  providerId: string,
+  limit: number = 50
+): Promise<{ data: Review[]; error: Error | null }> {
+  try {
+    const { data, error } = await supabase
+      .from('reviews')
+      .select(`
+        id, booking_id, customer_id, provider_id, rating, comment,
+        dispute_status, dispute_reason, pro_rating_of_customer,
+        pro_private_feedback, created_at, updated_at,
+        customer:users!reviews_customer_id_fkey(id, email),
+        customer_profile:customer_profiles!reviews_customer_id_fkey(first_name, last_name, avatar_url)
+      `)
+      .eq('provider_id', providerId)
+      .neq('dispute_status', 'upheld')
+      .order('created_at', { ascending: false })
+      .limit(limit)
+
+    if (error) throw error
+
+    // Hydrate customer_name
+    const hydrated = (data || []).map((r: any) => {
+      const profile = r.customer_profile
+      const fullName = profile
+        ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim()
+        : ''
+      return {
+        ...r,
+        customer_name: fullName || r.customer?.email?.split('@')[0] || 'Customer',
+        customer_avatar_url: profile?.avatar_url || null,
+      }
+    })
+
+    return { data: hydrated as Review[], error: null }
+  } catch (error) {
+    return { data: [], error: error as Error }
+  }
+}
+
+/**
+ * Get the customer's own review for a specific booking (if any).
+ */
+export async function getReviewForBooking(
+  bookingId: string
+): Promise<{ data: Review | null; error: Error | null }> {
+  try {
+    const { data, error } = await supabase
+      .from('reviews')
+      .select('*')
+      .eq('booking_id', bookingId)
+      .maybeSingle()
+
+    if (error) throw error
+    return { data, error: null }
+  } catch (error) {
+    return { data: null, error: error as Error }
+  }
+}
+
+/**
+ * Pro disputes a review they think is fake or unfair.
+ * Sets dispute_status to 'disputed' and stores the reason.
+ * An admin (or future automated check) will resolve it.
+ */
+export async function disputeReview(
+  reviewId: string,
+  reason: string
+): Promise<{ error: Error | null }> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: new Error('Not signed in') }
+
+    // Get the provider profile for this user
+    const { data: provider } = await supabase
+      .from('provider_profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!provider) return { error: new Error('No provider profile') }
+
+    const { error } = await supabase
+      .from('reviews')
+      .update({
+        dispute_status: 'disputed',
+        dispute_reason: reason.trim(),
+      })
+      .eq('id', reviewId)
+      .eq('provider_id', provider.id)  // can only dispute own reviews
+      .eq('dispute_status', 'none')     // can't re-dispute a resolved one
+
+    if (error) throw error
+    return { error: null }
+  } catch (error) {
+    return { error: error as Error }
+  }
+}
+
+// ============================================
+// FAVORITES (Phase 1 Quality Control)
+// ============================================
+
+export interface Favorite {
+  id: string
+  customer_id: string
+  provider_id: string
+  created_at: string
+  // Hydrated
+  provider?: {
+    id: string
+    display_name: string | null
+    profile_image_url: string | null
+    average_rating: number
+    review_count: number
+    bio: string | null
+  }
+}
+
+/**
+ * Add a pro to customer's favorites.
+ */
+export async function addFavorite(
+  providerId: string
+): Promise<{ data: Favorite | null; error: Error | null }> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { data: null, error: new Error('Not signed in') }
+
+    const { data, error } = await supabase
+      .from('favorites')
+      .upsert({
+        customer_id: user.id,
+        provider_id: providerId,
+      }, { onConflict: 'customer_id,provider_id' })
+      .select()
+      .single()
+
+    if (error) throw error
+    return { data, error: null }
+  } catch (error) {
+    return { data: null, error: error as Error }
+  }
+}
+
+/**
+ * Remove a pro from customer's favorites.
+ */
+export async function removeFavorite(
+  providerId: string
+): Promise<{ error: Error | null }> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: new Error('Not signed in') }
+
+    const { error } = await supabase
+      .from('favorites')
+      .delete()
+      .eq('customer_id', user.id)
+      .eq('provider_id', providerId)
+
+    if (error) throw error
+    return { error: null }
+  } catch (error) {
+    return { error: error as Error }
+  }
+}
+
+/**
+ * Get all of a customer's favorited pros, with the pro's profile data hydrated.
+ */
+export async function getCustomerFavorites(
+  customerId?: string
+): Promise<{ data: Favorite[]; error: Error | null }> {
+  try {
+    let userId = customerId
+    if (!userId) {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return { data: [], error: null }
+      userId = user.id
+    }
+
+    const { data, error } = await supabase
+      .from('favorites')
+      .select(`
+        id, customer_id, provider_id, created_at,
+        provider:provider_profiles!favorites_provider_id_fkey(
+          id, display_name, profile_image_url, average_rating, review_count, bio
+        )
+      `)
+      .eq('customer_id', userId)
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+    return { data: (data || []) as Favorite[], error: null }
+  } catch (error) {
+    return { data: [], error: error as Error }
+  }
+}
+
+/**
+ * Check if a customer has favorited a specific pro.
+ * Returns { isFavorited: boolean, favoriteId: string | null }
+ */
+export async function isFavorited(
+  providerId: string
+): Promise<{ isFavorited: boolean; favoriteId: string | null }> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { isFavorited: false, favoriteId: null }
+
+    const { data, error } = await supabase
+      .from('favorites')
+      .select('id')
+      .eq('customer_id', user.id)
+      .eq('provider_id', providerId)
+      .maybeSingle()
+
+    if (error) {
+      console.warn('isFavorited check failed:', error.message)
+      return { isFavorited: false, favoriteId: null }
+    }
+    return { isFavorited: !!data, favoriteId: data?.id || null }
+  } catch (error) {
+    return { isFavorited: false, favoriteId: null }
+  }
+}

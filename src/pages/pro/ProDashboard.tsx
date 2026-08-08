@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Briefcase, Calendar, DollarSign, Clock, MapPin, ArrowRight,
-  AlertCircle, CheckCircle, User, Loader2, Wallet, TrendingUp, ChevronDown, ChevronUp
+  AlertCircle, CheckCircle, User, Loader2, Wallet, TrendingUp, ChevronDown, ChevronUp, Star
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
-import { getProviderProfile } from '../../lib/api'
+import { getProviderProfile, getReviewsForProvider, type Review } from '../../lib/api'
 import {
   getAvailableJobsWithDetails,
   getProAssignedJobsWithDetails,
@@ -14,6 +14,8 @@ import {
 } from '../../lib/proDashboard'
 import AddonBadges from '../../components/AddonBadges'
 import { formatBookingStatus, serviceTypeLabel, yardSizeLabel, serviceFrequencyLabel } from '../../lib/labels'
+import StarRating from '../../components/StarRating'
+import ReviewsList from '../../components/ReviewsList'
 
 export default function ProDashboard() {
   const { user } = useAuth()
@@ -264,6 +266,28 @@ export default function ProDashboard() {
           </Link>
         </div>
       </div>
+
+      {/* Your reviews + rating */}
+      {profile?.id && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold text-slate-900 flex items-center gap-2">
+              <Star className="text-amber-500 fill-amber-500" size={18} />
+              Your reviews
+            </h2>
+            <div className="flex items-center gap-2">
+              <StarRating
+                value={Number(profile.average_rating) || 0}
+                size="sm"
+                readOnly
+                showNumber
+                reviewCount={Number(profile.review_count) || 0}
+              />
+            </div>
+          </div>
+          <ReviewsList providerId={profile.id} limit={5} allowDispute />
+        </div>
+      )}
 
       {/* Coming up — clickable, expand-in-place */}
       {upcomingJobs.length > 0 && (
