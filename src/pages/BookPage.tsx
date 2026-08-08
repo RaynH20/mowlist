@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
-import { Check, ChevronRight, MapPin, Calendar, CreditCard, Clock, Home, RefreshCw, Star, Shield, Lock, Upload, X, Phone, Mail, MessageSquare, AlertCircle } from 'lucide-react'
+import { Check, ChevronRight, MapPin, Calendar, CreditCard, Clock, Home, RefreshCw, Star, Shield, Lock, Upload, X, Phone, Mail, MessageSquare, AlertCircle, Plus } from 'lucide-react'
 import { useAuth } from '../lib/auth-context'
 import { supabase } from '../lib/supabase'
 import { createAddress, createBookingRequest, createQuoteRequest, createBooking } from '../lib/api'
+import { ADDON_CATALOG, ADDON_BY_ID, calculateAddonTotal, isAddonAvailableFor } from '../lib/addons'
 
 export default function BookPage() {
   const [searchParams] = useSearchParams()
@@ -177,13 +178,13 @@ export default function BookPage() {
     contactPreference: 'email',
     preferredTiming: 'flexible',
     photos: [] as string[],
+    // Add-ons (lawn mowing only — matched against ADDON_CATALOG in src/lib/addons.ts)
+    // Each entry: { id, name, price, icon }
+    selectedAddons: [] as Array<{ id: string; name: string; price: number; icon: string }>,
   })
 
-  const services = [
-    { id: 'mowing', name: 'Lawn Mowing', price: 45, description: 'Standard mowing service' },
-    { id: 'edging', name: 'Edging', price: 15, description: 'Edge trimming around walks & beds' },
-    { id: 'blowing', name: 'Leaf Blowing', price: 20, description: 'Blow off driveway & walkways' },
-  ]
+  // Add-on service catalog lives in src/lib/addons.ts (shared with ProProfile).
+  // Lawn Mowing is the only base service; everything else is an add-on.
 
   const frequencies = [
     { id: 'one-time', name: 'One-Time', description: 'Single service visit' },
@@ -290,10 +291,14 @@ export default function BookPage() {
   }
 
   const calculatePrice = () => {
+    // Lawn size base (with frequency discount applied to base, not addons)
     let base = formData.lawnSize === 'small' ? 35 : formData.lawnSize === 'medium' ? 45 : formData.lawnSize === 'large' ? 65 : 0
     if (formData.frequency === 'weekly') base = base * 0.9
     if (formData.frequency === 'biweekly') base = base * 0.95
-    return Math.round(base)
+    const baseRounded = Math.round(base)
+    // Add-ons are full price (no discount on addons, even for recurring)
+    const addonTotal = calculateAddonTotal(formData.selectedAddons)
+    return baseRounded + addonTotal
   }
 
   // Map form-friendly values to schema enum values
@@ -455,7 +460,8 @@ export default function BookPage() {
           estimated_price: calculatePrice(),
           booking_status: 'requested',
           payment_status: 'pending',
-        })
+          selected_addons: formData.selectedAddons,
+        } as any)
 
         if (bookingCreateError || !newBooking) {
           throw new Error('Failed to create booking')
@@ -833,6 +839,76 @@ export default function BookPage() {
                   <p className="text-xs text-slate-500 mt-2 pt-2 border-t border-green-100">
                     * Final price may vary after on-site assessment
                   </p>
+                </div>
+              )}
+
+              {/* ============ ADD-ONS (Lawn Mowing only) ============ */}
+              {!isCustomQuote && formData.frequency !== 'custom' && (
+                <div className="mt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">Add extras (optional)</p>
+                      <p className="text-xs text-slate-500">Bundle with your mow to save a separate trip</p>
+                    </div>
+                    <span className="text-xs text-slate-500">
+                      {formData.selectedAddons.length > 0
+                        ? `${formData.selectedAddons.length} added`
+                        : 'Skip →'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {ADDON_CATALOG.map((addon) => {
+                      const isSelected = formData.selectedAddons.some((a) => a.id === addon.id)
+                      return (
+                        <button
+                          key={addon.id}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              updateForm('selectedAddons', formData.selectedAddons.filter((a) => a.id !== addon.id))
+                            } else {
+                              updateForm('selectedAddons', [...formData.selectedAddons, {
+                                id: addon.id,
+                                name: addon.name,
+                                price: addon.price,
+                                icon: addon.icon,
+                              }])
+                            }
+                          }}
+                          className={`p-2.5 border-2 rounded-lg text-left transition-all ${
+                            isSelected
+                              ? 'border-[#22C55E] bg-green-50'
+                              : 'border-slate-200 hover:border-[#22C55E]/50'
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                              isSelected ? 'border-[#22C55E] bg-[#22C55E]' : 'border-slate-300 bg-white'
+                            }`}>
+                              {isSelected && <Check size={12} className="text-white" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-base">{addon.icon}</span>
+                                <p className="font-medium text-slate-900 text-xs truncate">{addon.name}</p>
+                              </div>
+                              <p className="text-xs text-slate-600 mt-0.5">+${addon.price}</p>
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {formData.selectedAddons.length > 0 && (
+                    <div className="mt-2 p-2.5 bg-blue-50 border border-blue-100 rounded-lg flex items-center justify-between">
+                      <span className="text-xs text-blue-700">
+                        Add-ons: {formData.selectedAddons.map((a) => a.name).join(', ')}
+                      </span>
+                      <span className="text-xs font-semibold text-blue-700">
+                        +${calculateAddonTotal(formData.selectedAddons)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1314,6 +1390,14 @@ export default function BookPage() {
                   <span className="text-slate-500">Service fee</span>
                   <span className="font-medium text-slate-900">$2.99</span>
                 </div>
+                {formData.selectedAddons.length > 0 && (
+                  <div className="p-3 flex justify-between text-sm">
+                    <span className="text-slate-500">Add-ons</span>
+                    <span className="font-medium text-slate-900 text-right">
+                      {formData.selectedAddons.map(a => `${a.icon} ${a.name}`).join(', ')}
+                    </span>
+                  </div>
+                )}
                 <div className="p-3 flex justify-between items-center">
                   <span className="font-semibold text-slate-900">Total today</span>
                   <span className="font-bold text-lg text-[#22C55E]">

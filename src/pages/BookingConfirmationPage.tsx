@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { Check, Calendar, MapPin, CreditCard, Download, Clock, Home, ArrowRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import AddonBadges from '../components/AddonBadges'
 
 interface BookingConfirmationState {
   bookingId: string
@@ -10,6 +11,7 @@ interface BookingConfirmationState {
   price: number
   date: string
   paymentIntentId?: string
+  selectedAddons?: any[] | null
 }
 
 export default function BookingConfirmationPage() {
@@ -25,6 +27,7 @@ export default function BookingConfirmationPage() {
   const lawnSize = state?.lawnSize || 'Medium Yard'
   const price = state?.price || 45
   const date = state?.date || new Date().toLocaleDateString()
+  const selectedAddons = state?.selectedAddons || null
 
   const [stripeReceiptUrl, setStripeReceiptUrl] = useState<string | null>(null)
 
@@ -209,6 +212,12 @@ export default function BookingConfirmationPage() {
                 <CreditCard size={18} className="text-slate-400" />
                 <span>Payment held until service complete</span>
               </div>
+              {Array.isArray(selectedAddons) && selectedAddons.length > 0 && (
+                <div className="pt-2">
+                  <p className="text-xs text-slate-500 mb-1.5">Add-ons included</p>
+                  <AddonBadges selectedAddons={selectedAddons} variant="chips" />
+                </div>
+              )}
             </div>
 
             {/* Price */}

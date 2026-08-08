@@ -15,6 +15,7 @@ import {
 } from '../../lib/proDashboard'
 import { serviceTypeLabel, yardSizeLabel } from '../../lib/labels'
 import JobPhotoGallery from '../../components/JobPhotoGallery'
+import AddonBadges from '../../components/AddonBadges'
 
 export default function ProJobs() {
   const { user } = useAuth()
@@ -609,6 +610,14 @@ function AvailableJobCard({
             {formatDate(job.scheduled_date)} · {job.scheduled_time_window || 'Time TBD'}
           </span>
         </div>
+
+        {/* Add-ons the customer selected (lawn mowing only) */}
+        {Array.isArray((job as any).selected_addons) && (job as any).selected_addons.length > 0 && (
+          <div className="mb-4">
+            <p className="text-xs text-slate-500 mb-1.5">Customer add-ons</p>
+            <AddonBadges selectedAddons={(job as any).selected_addons} variant="chips" />
+          </div>
+        )}
 
         {expanded && (
           <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">

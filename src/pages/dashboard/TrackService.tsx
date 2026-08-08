@@ -383,6 +383,7 @@ export default function TrackService() {
               address={bookingAddress}
               proLat={booking.pro_lat}
               proLng={booking.pro_lng}
+              selectedAddons={(booking as any).selected_addons}
             />
           </ErrorBoundary>
         </div>

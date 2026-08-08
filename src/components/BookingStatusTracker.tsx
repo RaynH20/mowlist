@@ -3,6 +3,7 @@ import type { BookingStatus, Address } from '../lib/database.types'
 import LiveTrackingMap from './LiveTrackingMap'
 import ErrorBoundary from './ErrorBoundary'
 import JobPhotoGallery from './JobPhotoGallery'
+import AddonBadges from './AddonBadges'
 
 interface StatusStep {
   id: BookingStatus
@@ -47,6 +48,8 @@ interface BookingStatusTrackerProps {
   /** Initial pro position from booking */
   proLat?: number | null
   proLng?: number | null
+  /** Add-ons the customer selected (lawn mowing only) */
+  selectedAddons?: any[] | null
 }
 
 export default function BookingStatusTracker({
@@ -58,6 +61,7 @@ export default function BookingStatusTracker({
   afterPhotoUrl,
   hasActiveTracking = false,
   bookingId,
+  selectedAddons,
   address,
   proLat,
   proLng,
@@ -110,6 +114,14 @@ export default function BookingStatusTracker({
               Live tracking active
             </div>
           )}
+        </div>
+      )}
+
+      {/* Add-ons the customer selected (lawn mowing only) */}
+      {Array.isArray(selectedAddons) && selectedAddons.length > 0 && (
+        <div>
+          <p className="text-xs text-slate-500 mb-1.5">Add-ons for this job</p>
+          <AddonBadges selectedAddons={selectedAddons} variant="chips" />
         </div>
       )}
 

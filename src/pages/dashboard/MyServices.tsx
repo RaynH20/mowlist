@@ -5,6 +5,7 @@ import { useAuth } from '../../lib/auth-context'
 import { getCustomerBookings, getCustomerQuoteRequests, updateBookingStatus } from '../../lib/api'
 import type { Booking, QuoteRequest } from '../../lib/database.types'
 import ProAvatar from '../../components/ProAvatar'
+import AddonBadges from '../../components/AddonBadges'
 
 const YARD_SIZE_LABELS: Record<string, string> = {
   small: 'Small Yard',
@@ -269,6 +270,14 @@ export default function MyServices() {
               <p className="text-xs text-slate-500">Your pro</p>
               <p className="font-medium text-slate-900 truncate">{booking.provider_name}</p>
             </div>
+          </div>
+        )}
+
+        {/* Selected add-ons (lawn mowing only) */}
+        {Array.isArray((booking as any).selected_addons) && (booking as any).selected_addons.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <p className="text-xs text-slate-500 mb-1.5">Add-ons</p>
+            <AddonBadges selectedAddons={(booking as any).selected_addons} variant="chips" />
           </div>
         )}
 

@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth-context'
 import { supabase } from '../lib/supabase'
 import { Loader2, Clock, CheckCircle, MapPin, Calendar, Scissors, AlertCircle, ArrowRight } from 'lucide-react'
+import AddonBadges from '../components/AddonBadges'
 
 interface PendingBooking {
   id: string
@@ -14,6 +15,7 @@ interface PendingBooking {
   service_frequency: string
   provider_id: string | null
   payment_status: string
+  selected_addons?: any[] | null
   address: {
     street_1: string
     city: string
@@ -70,6 +72,7 @@ export default function BookingPendingPage() {
           .select(`
             id, booking_status, estimated_price, scheduled_date, scheduled_time_window,
             yard_size_category, service_frequency, provider_id, payment_status,
+            selected_addons,
             address:addresses(street_1, city, state, zip_code),
             pro:provider_profiles(display_name)
           `)
@@ -252,7 +255,12 @@ export default function BookingPendingPage() {
                 </span>
               </div>
             )}
-            <div className="flex items-center justify-between border-t border-slate-100 pt-2">
+            {Array.isArray(booking.selected_addons) && booking.selected_addons.length > 0 && (
+              <div className="pt-2">
+                <AddonBadges selectedAddons={booking.selected_addons} variant="chips" />
+              </div>
+            )}
+            <div className="flex items-center justify-between border-t border-slate-100 pt-2 mt-3">
               <span className="font-semibold text-slate-900">Total</span>
               <span className="text-xl font-bold text-[#22C55E]">
                 ${booking.estimated_price.toFixed(2)}
