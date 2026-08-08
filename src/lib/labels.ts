@@ -42,3 +42,22 @@ export function serviceFrequencyLabel(value: string | null | undefined): string 
   if (!value) return ''
   return SERVICE_FREQUENCY_LABELS[value] || value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
+
+export const BOOKING_STATUS_LABELS: Record<string, string> = {
+  requested: 'Awaiting Pro',
+  booked: 'Booked',
+  provider_assigned: 'Confirmed',
+  on_the_way: 'On the way',
+  arrived: 'On site',
+  in_progress: 'Mowing',
+  mowing: 'Mowing',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+  disputed: 'Disputed',
+  refunded: 'Refunded',
+}
+
+export function formatBookingStatus(value: string | null | undefined): string {
+  if (!value) return ''
+  return BOOKING_STATUS_LABELS[value] || value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}

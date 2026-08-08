@@ -311,41 +311,49 @@ export default function Dashboard() {
             </Link>
           </div>
           <div className="space-y-2">
-            {upcomingBookings.slice(0, 3).map((booking) => (
-              <Link
-                key={booking.id}
-                to={`/dashboard/track?booking=${booking.id}`}
-                className="block border border-slate-200 rounded-lg p-3 hover:border-[#22C55E] hover:bg-green-50/30 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Scissors size={16} className="text-[#22C55E]" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-slate-900 text-sm truncate">
-                      {YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
-                    </p>
-                    <p className="text-xs text-slate-500">{formatDate(booking.scheduled_date)}</p>
-                    {(booking as any).provider_name && (
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <ProAvatar
-                          imageUrl={(booking as any).provider_image_url}
-                          name={(booking as any).provider_name}
-                          size="sm"
-                        />
-                        <p className="text-xs text-slate-500 truncate">
-                          <span className="font-medium text-slate-700">{(booking as any).provider_name}</span>
-                        </p>
+            {upcomingBookings.slice(0, 3).map((booking) => {
+              const hasPro = !!(booking as any).provider_name
+              return (
+                <Link
+                  key={booking.id}
+                  to={`/dashboard/track?booking=${booking.id}`}
+                  className="block border border-slate-200 rounded-lg p-3 hover:border-[#22C55E] hover:bg-green-50/30 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    {hasPro ? (
+                      <ProAvatar
+                        imageUrl={(booking as any).provider_image_url}
+                        name={(booking as any).provider_name}
+                        size="md"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <Scissors size={16} className="text-[#22C55E]" />
                       </div>
                     )}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-slate-900 text-sm truncate">
+                        {hasPro
+                          ? (booking as any).provider_name
+                          : YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {hasPro
+                          ? `${YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn'} · ${formatDate(booking.scheduled_date)}`
+                          : 'Awaiting Pro · ' + formatDate(booking.scheduled_date)}
+                      </p>
+                      {!hasPro && (
+                        <span className="text-xs text-amber-600 font-medium">Waiting for pro to accept</span>
+                      )}
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-sm font-semibold text-slate-900">${booking.estimated_price}</p>
+                      <p className="text-xs text-[#22C55E] font-medium">View →</p>
+                    </div>
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-semibold text-slate-900">${booking.estimated_price}</p>
-                    <p className="text-xs text-[#22C55E] font-medium">View →</p>
-                  </div>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              )
+            })}
           </div>
         </div>
       )}

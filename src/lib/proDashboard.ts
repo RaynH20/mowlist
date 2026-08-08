@@ -26,6 +26,7 @@ export interface ProBookingWithDetails {
   customer_name: string | null
   customer_email: string | null
   customer_phone: string | null
+  customer_avatar_url: string | null
   address_line: string | null
   address_city: string | null
   address_state: string | null
@@ -74,7 +75,7 @@ export async function getAvailableJobsWithDetails(): Promise<{
 
     const { data: profilesData } = await supabase
       .from('customer_profiles')
-      .select('user_id, first_name, last_name')
+      .select('user_id, first_name, last_name, avatar_url')
       .in('user_id', userIds)
 
     // Fetch all addresses in one go
@@ -96,6 +97,7 @@ export async function getAvailableJobsWithDetails(): Promise<{
       return {
         ...b,
         customer_name: profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() : null,
+        customer_avatar_url: (profile as any)?.avatar_url || null,
         customer_email: user?.email || null,
         customer_phone: user?.phone || null,
         address_line: address?.street_1 || null,
@@ -162,7 +164,7 @@ export async function getProAssignedJobsWithDetails(providerId: string): Promise
 
     const { data: profilesData } = await supabase
       .from('customer_profiles')
-      .select('user_id, first_name, last_name')
+      .select('user_id, first_name, last_name, avatar_url')
       .in('user_id', userIds)
 
     const { data: addressesData } = await supabase
@@ -181,6 +183,7 @@ export async function getProAssignedJobsWithDetails(providerId: string): Promise
       return {
         ...b,
         customer_name: profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() : null,
+        customer_avatar_url: (profile as any)?.avatar_url || null,
         customer_email: user?.email || null,
         customer_phone: user?.phone || null,
         address_line: address?.street_1 || null,
@@ -295,7 +298,7 @@ export async function getProEarningsBreakdown(providerId: string): Promise<{
 
       const { data: profilesData } = await supabase
         .from('customer_profiles')
-        .select('user_id, first_name, last_name')
+        .select('user_id, first_name, last_name, avatar_url')
         .in('user_id', userIds)
       const { data: addressesData } = await supabase
         .from('addresses')
@@ -313,6 +316,7 @@ export async function getProEarningsBreakdown(providerId: string): Promise<{
         completedJobs.push({
           ...b,
           customer_name: profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() : null,
+        customer_avatar_url: (profile as any)?.avatar_url || null,
           customer_email: user?.email || null,
           customer_phone: user?.phone || null,
           address_line: address?.street_1 || null,

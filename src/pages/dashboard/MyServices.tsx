@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Pause, X, Loader2, AlertCircle, Calendar, Scissors, RefreshCw, FileText, Clock, ArrowRight, User, Zap, CheckCircle2 } from 'lucide-react'
+import { Pause, X, Loader2, AlertCircle, Calendar, Scissors, RefreshCw, FileText, Clock, ArrowRight, User, Zap, CheckCircle2, ChevronDown, ChevronUp, MapPin, Edit2 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { getCustomerBookings, getCustomerQuoteRequests, updateBookingStatus } from '../../lib/api'
 import type { Booking, QuoteRequest } from '../../lib/database.types'
@@ -80,6 +80,7 @@ export default function MyServices() {
   const { user } = useAuth()
   const [bookings, setBookings] = useState<Booking[]>([])
   const [quoteRequests, setQuoteRequests] = useState<QuoteRequest[]>([])
+  const [expandedQuote, setExpandedQuote] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [updating, setUpdating] = useState<string | null>(null)
@@ -328,36 +329,121 @@ export default function MyServices() {
                 {openQuotes.map((quote) => {
                   const statusInfo = QUOTE_STATUS_LABELS[quote.status] || { label: quote.status, color: 'bg-slate-100 text-slate-600' }
                   const isQuoted = quote.status === 'quoted' && quote.quoted_price != null
+                  const isExpanded = expandedQuote === quote.id
+                  const propertyLabel = quote.property_type === 'other' && quote.property_type_other
+                    ? quote.property_type_other
+                    : quote.property_type.charAt(0).toUpperCase() + quote.property_type.slice(1)
                   return (
-                    <div key={quote.id} className="bg-white rounded-xl shadow-sm border border-blue-100 p-5">
-                      <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <h3 className="font-semibold text-slate-900">
-                              {quote.property_type === 'other' && quote.property_type_other
-                                ? quote.property_type_other
-                                : quote.property_type.charAt(0).toUpperCase() + quote.property_type.slice(1)}
-                              {' '}— Custom Quote
-                            </h3>
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusInfo.color}`}>
-                              {statusInfo.label}
-                            </span>
+                    <div
+                      key={quote.id}
+                      className={`bg-white rounded-xl shadow-sm border transition-colors ${
+                        isExpanded ? 'border-blue-300' : 'border-blue-100'
+                      }`}
+                    >
+                      <button
+                        onClick={() => setExpandedQuote(isExpanded ? null : quote.id)}
+                        className="w-full p-5 text-left"
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <h3 className="font-semibold text-slate-900">
+                                {propertyLabel} — Custom Quote
+                              </h3>
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusInfo.color}`}>
+                                {statusInfo.label}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 font-mono">
+                              Quote #{quote.id.slice(-8).toUpperCase()}
+                            </p>
                           </div>
-                          <p className="text-xs text-slate-500 font-mono">
-                            Quote #{quote.id.slice(-8).toUpperCase()}
-                          </p>
+                          {isQuoted && (
+                            <div className="text-right">
+                              <p className="text-xs text-slate-500">Quoted price</p>
+                              <p className="text-2xl font-bold text-[#22C55E]">${quote.quoted_price!.toFixed(0)}</p>
+                            </div>
+                          )}
                         </div>
-                        {isQuoted && (
-                          <div className="text-right">
-                            <p className="text-xs text-slate-500">Quoted price</p>
-                            <p className="text-2xl font-bold text-[#22C55E]">${quote.quoted_price!.toFixed(0)}</p>
+                        <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                          <span className="flex items-center gap-1.5">
+                            <Clock size={12} />
+                            Submitted {formatDate(quote.created_at.split('T')[0])}
+                          </span>
+                          {isExpanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+                        </div>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="px-5 pb-5 pt-1 border-t border-slate-100 space-y-3">
+                          {quote.description && (
+                            <div>
+                              <p className="text-xs font-medium text-slate-500 mb-1">Description</p>
+                              <p className="text-sm text-slate-700 whitespace-pre-line">{quote.description}</p>
+                            </div>
+                          )}
+                          {quote.yard_size_category && (
+                            <div className="flex items-center gap-2 text-sm">
+                              <span className="text-xs font-medium text-slate-500">Yard size:</span>
+                              <span className="text-slate-900">{YARD_SIZE_LABELS[quote.yard_size_category] || quote.yard_size_category}</span>
+                            </div>
+                          )}
+                          {quote.service_frequency && (
+                            <div className="flex items-center gap-2 text-sm">
+                              <span className="text-xs font-medium text-slate-500">Frequency:</span>
+                              <span className="text-slate-900">{FREQUENCY_LABELS[quote.service_frequency] || quote.service_frequency}</span>
+                            </div>
+                          )}
+                          {quote.address && (
+                            <div className="flex items-start gap-1.5 text-sm">
+                              <MapPin size={14} className="text-slate-400 mt-0.5 flex-shrink-0" />
+                              <span className="text-slate-700">{quote.address}</span>
+                            </div>
+                          )}
+                          {quote.special_instructions && (
+                            <div>
+                              <p className="text-xs font-medium text-slate-500 mb-1">Special instructions</p>
+                              <p className="text-sm text-slate-700 whitespace-pre-line">{quote.special_instructions}</p>
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100 mt-2">
+                            {isQuoted ? (
+                              <>
+                                <button className="flex-1 sm:flex-none bg-[#22C55E] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#16A34A] transition-colors">
+                                  Accept quote (${quote.quoted_price!.toFixed(0)})
+                                </button>
+                                <button className="flex-1 sm:flex-none bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-slate-200 transition-colors">
+                                  Decline
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <Link
+                                  to={`/book?quote=${quote.id}`}
+                                  className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 bg-[#22C55E] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#16A34A] transition-colors"
+                                >
+                                  <Edit2 size={14} />
+                                  Edit details
+                                </Link>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    if (confirm('Cancel this quote request?')) {
+                                      // TODO: call API to cancel quote
+                                      alert('Cancel quote not yet implemented — coming soon')
+                                    }
+                                  }}
+                                  className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors"
+                                >
+                                  <X size={14} />
+                                  Cancel quote
+                                </button>
+                              </>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <Clock size={12} />
-                        <span>Submitted {formatDate(quote.created_at.split('T')[0])}</span>
-                      </div>
+                        </div>
+                      )}
                     </div>
                   )
                 })}

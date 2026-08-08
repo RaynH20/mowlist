@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Briefcase, Calendar, DollarSign, Clock, MapPin, ArrowRight,
-  AlertCircle, CheckCircle, User, Loader2, Wallet, TrendingUp
+  AlertCircle, CheckCircle, User, Loader2, Wallet, TrendingUp, ChevronDown, ChevronUp
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { getProviderProfile } from '../../lib/api'
@@ -12,6 +12,8 @@ import {
   getProEarningsBreakdown,
   type ProBookingWithDetails,
 } from '../../lib/proDashboard'
+import AddonBadges from '../../components/AddonBadges'
+import { formatBookingStatus, serviceTypeLabel, yardSizeLabel, serviceFrequencyLabel } from '../../lib/labels'
 
 export default function ProDashboard() {
   const { user } = useAuth()
@@ -19,6 +21,7 @@ export default function ProDashboard() {
   const [profile, setProfile] = useState<any>(null)
   const [availableJobs, setAvailableJobs] = useState<ProBookingWithDetails[]>([])
   const [assignedJobs, setAssignedJobs] = useState<ProBookingWithDetails[]>([])
+  const [expandedJob, setExpandedJob] = useState<string | null>(null)
   const [earnings, setEarnings] = useState<{
     today: number
     thisWeek: number
@@ -161,34 +164,79 @@ export default function ProDashboard() {
         </div>
       </div>
 
-      {/* Today's schedule */}
+      {/* Today's schedule — clickable, expand-in-place */}
       {todaysJobs.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 mb-6">
           <h2 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
             <Clock className="text-[#22C55E]" size={18} />
             Today's Schedule
           </h2>
-          <div className="space-y-3">
-            {todaysJobs.map((job) => (
-              <Link
-                key={job.id}
-                to={`/pro/schedule?booking=${job.id}`}
-                className="flex items-center justify-between gap-3 p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-900 text-sm">
-                    {job.customer_name || 'Customer'}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {job.scheduled_time_window || 'Time TBD'} · {job.address_line || 'Address TBD'}
-                  </p>
+          <div className="space-y-2">
+            {todaysJobs.map((job) => {
+              const isExpanded = expandedJob === job.id
+              return (
+                <div
+                  key={job.id}
+                  className={`rounded-lg border transition-colors ${
+                    isExpanded
+                      ? 'bg-white border-[#22C55E] shadow-md'
+                      : 'bg-slate-50 border-transparent hover:bg-slate-100 hover:border-slate-200'
+                  }`}
+                >
+                  <button
+                    onClick={() => setExpandedJob(isExpanded ? null : job.id)}
+                    className="w-full flex items-center justify-between gap-3 p-3 text-left"
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <Calendar className="text-blue-600" size={18} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-slate-900 text-sm truncate">
+                          {job.customer_name || 'Customer'}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {job.scheduled_time_window || 'Time TBD'} · {job.address_line || 'Address TBD'}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700 flex-shrink-0">
+                      {formatBookingStatus(job.booking_status)}
+                    </span>
+                    {isExpanded ? <ChevronUp size={16} className="text-slate-400 flex-shrink-0" /> : <ChevronDown size={16} className="text-slate-400 flex-shrink-0" />}
+                  </button>
+                  {isExpanded && (
+                    <div className="px-3 pb-3 pt-1 border-t border-slate-100">
+                      <div className="text-xs text-slate-500 space-y-1.5 mt-2">
+                        <p className="flex items-center gap-1.5">
+                          <MapPin size={12} />
+                          {job.address_line}{job.address_city && `, ${job.address_city}`}{job.address_state && `, ${job.address_state}`}
+                        </p>
+                        <p className="text-slate-600">
+                          <span className="font-medium text-slate-700">Service:</span> {yardSizeLabel(job.yard_size_category)} · {serviceTypeLabel(job.service_type)} · {serviceFrequencyLabel(job.service_frequency)}
+                        </p>
+                        {Array.isArray((job as any).selected_addons) && (job as any).selected_addons.length > 0 && (
+                          <div>
+                            <p className="font-medium text-slate-700 mb-1">Customer add-ons:</p>
+                            <AddonBadges selectedAddons={(job as any).selected_addons} variant="chips" />
+                          </div>
+                        )}
+                        <p className="text-slate-600 pt-1">
+                          <span className="font-medium text-slate-700">Your company:</span> {displayName}
+                        </p>
+                      </div>
+                      <Link
+                        to={`/pro/schedule?booking=${job.id}`}
+                        className="inline-flex items-center gap-1 text-xs text-[#22C55E] font-medium mt-3 hover:underline"
+                      >
+                        Open full details
+                        <ArrowRight size={12} />
+                      </Link>
+                    </div>
+                  )}
                 </div>
-                <span className="text-xs text-[#22C55E] font-medium flex items-center gap-1">
-                  Open
-                  <ArrowRight size={12} />
-                </span>
-              </Link>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
@@ -217,33 +265,74 @@ export default function ProDashboard() {
         </div>
       </div>
 
-      {/* Upcoming next */}
+      {/* Coming up — clickable, expand-in-place */}
       {upcomingJobs.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
           <h2 className="font-semibold text-slate-900 mb-3">Coming up</h2>
-          <div className="space-y-3">
-            {upcomingJobs.map((job) => (
-              <div key={job.id} className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Calendar className="text-blue-600" size={18} />
+          <div className="space-y-2">
+            {upcomingJobs.map((job) => {
+              const isExpanded = expandedJob === job.id
+              return (
+                <div
+                  key={job.id}
+                  className={`rounded-lg border transition-colors ${
+                    isExpanded
+                      ? 'bg-white border-[#22C55E] shadow-md'
+                      : 'bg-slate-50 border-transparent hover:bg-slate-100 hover:border-slate-200'
+                  }`}
+                >
+                  <button
+                    onClick={() => setExpandedJob(isExpanded ? null : job.id)}
+                    className="w-full flex items-center gap-3 p-3 text-left"
+                  >
+                    <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <Calendar className="text-blue-600" size={18} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-900 truncate">
+                        {job.customer_name || 'Customer'}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {job.scheduled_date} {job.scheduled_time_window && `· ${job.scheduled_time_window}`}
+                      </p>
+                    </div>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700 flex-shrink-0">
+                      {formatBookingStatus(job.booking_status)}
+                    </span>
+                    {isExpanded ? <ChevronUp size={16} className="text-slate-400 flex-shrink-0" /> : <ChevronDown size={16} className="text-slate-400 flex-shrink-0" />}
+                  </button>
+                  {isExpanded && (
+                    <div className="px-3 pb-3 pt-1 border-t border-slate-100">
+                      <div className="text-xs text-slate-500 space-y-1.5 mt-2">
+                        <p className="flex items-center gap-1.5">
+                          <MapPin size={12} />
+                          {job.address_line}{job.address_city && `, ${job.address_city}`}{job.address_state && `, ${job.address_state}`}
+                        </p>
+                        <p className="text-slate-600">
+                          <span className="font-medium text-slate-700">Service:</span> {yardSizeLabel(job.yard_size_category)} · {serviceTypeLabel(job.service_type)} · {serviceFrequencyLabel(job.service_frequency)}
+                        </p>
+                        {Array.isArray((job as any).selected_addons) && (job as any).selected_addons.length > 0 && (
+                          <div>
+                            <p className="font-medium text-slate-700 mb-1">Customer add-ons:</p>
+                            <AddonBadges selectedAddons={(job as any).selected_addons} variant="chips" />
+                          </div>
+                        )}
+                        <p className="text-slate-600 pt-1">
+                          <span className="font-medium text-slate-700">Your company:</span> {displayName}
+                        </p>
+                      </div>
+                      <Link
+                        to={`/pro/schedule?booking=${job.id}`}
+                        className="inline-flex items-center gap-1 text-xs text-[#22C55E] font-medium mt-3 hover:underline"
+                      >
+                        Open full details
+                        <ArrowRight size={12} />
+                      </Link>
+                    </div>
+                  )}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-900">
-                    {job.customer_name || 'Customer'}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {job.scheduled_date} {job.scheduled_time_window && `· ${job.scheduled_time_window}`}
-                  </p>
-                </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                  job.booking_status === 'provider_assigned'
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-blue-100 text-blue-700'
-                }`}>
-                  {job.booking_status === 'provider_assigned' ? 'Confirmed' : job.booking_status}
-                </span>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

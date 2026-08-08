@@ -1,9 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { User, Mail, Phone, Home, Save, Loader2, AlertCircle, CheckCircle, LogOut } from 'lucide-react'
+import { User, Mail, Phone, Home, Save, Loader2, AlertCircle, CheckCircle, LogOut, Camera, Upload, X, Image as ImageIcon } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { supabase } from '../../lib/supabase'
 import type { Address } from '../../lib/database.types'
+
+// Preset avatars customers can pick from (no upload needed)
+const PRESET_AVATARS = [
+  { id: 'house-1', emoji: '🏡', label: 'House' },
+  { id: 'tree-1', emoji: '🌳', label: 'Tree' },
+  { id: 'flower-1', emoji: '🌸', label: 'Flower' },
+  { id: 'sun-1', emoji: '☀️', label: 'Sun' },
+  { id: 'mountain-1', emoji: '⛰️', label: 'Mountain' },
+  { id: 'beach-1', emoji: '🏖️', label: 'Beach' },
+  { id: 'cactus-1', emoji: '🌵', label: 'Cactus' },
+  { id: 'leaf-1', emoji: '🍃', label: 'Leaf' },
+  { id: 'dog-1', emoji: '🐕', label: 'Dog' },
+  { id: 'cat-1', emoji: '🐈', label: 'Cat' },
+  { id: 'balloon-1', emoji: '🎈', label: 'Balloon' },
+  { id: 'star-1', emoji: '⭐', label: 'Star' },
+]
 
 interface FormData {
   firstName: string
@@ -35,6 +51,11 @@ export default function AccountSettings() {
     state: '',
     zipCode: '',
   })
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [avatarSource, setAvatarSource] = useState<string | null>(null)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [addressId, setAddressId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -87,6 +108,8 @@ export default function AccountSettings() {
           zipCode: defaultAddress?.zip_code || '',
         })
         setAddressId(defaultAddress?.id || null)
+        setAvatarUrl((profile as any)?.avatar_url || null)
+        setAvatarSource((profile as any)?.avatar_source || null)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load settings')
       } finally {
@@ -103,19 +126,65 @@ export default function AccountSettings() {
     setSuccess(false)
   }
 
+  const handleAvatarFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !user) return
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose an image file (JPG, PNG, or GIF).')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image is too large. Please pick one under 5MB.')
+      return
+    }
+    setUploadingAvatar(true)
+    setError(null)
+    try {
+      const ext = file.name.split('.').pop() || 'jpg'
+      const filePath = `avatars/${user.id}/avatar-${Date.now()}.${ext}`
+      const { error: upErr } = await supabase.storage
+        .from('job-photos')
+        .upload(filePath, file, { upsert: true, contentType: file.type })
+      if (upErr) throw upErr
+      const { data: pub } = supabase.storage.from('job-photos').getPublicUrl(filePath)
+      setAvatarUrl(pub.publicUrl)
+      setAvatarSource('uploaded')
+      setShowAvatarPicker(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to upload photo')
+    } finally {
+      setUploadingAvatar(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const handlePresetAvatar = (preset: { id: string; emoji: string }) => {
+    // Store as a data URL so it persists (no storage roundtrip needed)
+    setAvatarUrl(`preset:${preset.id}`)
+    setAvatarSource('preset')
+    setShowAvatarPicker(false)
+  }
+
+  const handleRemoveAvatar = () => {
+    setAvatarUrl(null)
+    setAvatarSource(null)
+  }
+
   const handleSave = async () => {
     if (!user) return
     setSaving(true)
     setError(null)
     setSuccess(false)
     try {
-      // Update customer_profiles (first/last name)
+      // Update customer_profiles (first/last name + avatar)
       const { error: profileError } = await supabase
         .from('customer_profiles')
         .update({
           first_name: formData.firstName || null,
           last_name: formData.lastName || null,
-        })
+          avatar_url: avatarUrl,
+          avatar_source: avatarSource,
+        } as any)
         .eq('user_id', user.id)
 
       if (profileError) throw profileError
@@ -203,6 +272,100 @@ export default function AccountSettings() {
 
       <div className="bg-white rounded-xl shadow-sm p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-6">Profile Information</h2>
+
+        {/* Profile photo / avatar */}
+        <div className="mb-6 pb-6 border-b border-slate-100">
+          <p className="text-sm font-medium text-slate-700 mb-3">Your photo</p>
+          <p className="text-xs text-slate-500 mb-3">
+            Helps pros and neighbors recognize you. Use a real photo, or pick a fun icon.
+          </p>
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              {avatarUrl && avatarUrl.startsWith('preset:') ? (
+                (() => {
+                  const preset = PRESET_AVATARS.find(p => `preset:${p.id}` === avatarUrl)
+                  return (
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#22C55E] to-[#1E40AF] flex items-center justify-center text-3xl">
+                      {preset?.emoji || '👤'}
+                    </div>
+                  )
+                })()
+              ) : avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt="Your profile"
+                  className="w-20 h-20 rounded-full object-cover border-2 border-slate-200"
+                />
+              ) : (
+                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#22C55E] to-[#1E40AF] text-white font-bold text-2xl flex items-center justify-center">
+                  {(formData.firstName?.[0] || formData.email?.[0] || '?').toUpperCase()}
+                </div>
+              )}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingAvatar}
+                className="absolute bottom-0 right-0 w-7 h-7 bg-[#22C55E] text-white rounded-full flex items-center justify-center hover:bg-[#16A34A] transition-colors shadow-md disabled:opacity-50"
+                title="Upload photo"
+              >
+                {uploadingAvatar ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+              </button>
+            </div>
+            <div className="flex-1">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingAvatar}
+                  className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors disabled:opacity-50"
+                >
+                  <Upload size={14} />
+                  Upload
+                </button>
+                <button
+                  onClick={() => setShowAvatarPicker(!showAvatarPicker)}
+                  className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors"
+                >
+                  <ImageIcon size={14} />
+                  Pick icon
+                </button>
+                {avatarUrl && (
+                  <button
+                    onClick={handleRemoveAvatar}
+                    className="inline-flex items-center gap-1.5 text-slate-500 hover:text-red-500 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <X size={14} />
+                    Remove
+                  </button>
+                )}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleAvatarFile}
+                className="hidden"
+              />
+            </div>
+          </div>
+
+          {/* Preset icon picker */}
+          {showAvatarPicker && (
+            <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+              <p className="text-xs font-medium text-slate-700 mb-2">Choose an icon</p>
+              <div className="grid grid-cols-6 gap-2">
+                {PRESET_AVATARS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    onClick={() => handlePresetAvatar(preset)}
+                    className="aspect-square bg-white border-2 border-slate-200 rounded-lg flex items-center justify-center text-2xl hover:border-[#22C55E] hover:bg-green-50 transition-colors"
+                    title={preset.label}
+                  >
+                    {preset.emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">

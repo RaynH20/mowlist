@@ -2,7 +2,6 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Home, Calendar, MapPin, CreditCard, Settings, LogOut, Menu, X, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useAuth } from '../lib/auth-context'
-import Header from '../components/Header'
 
 export default function DashboardLayout() {
   const location = useLocation()
@@ -26,7 +25,7 @@ export default function DashboardLayout() {
 
   const sidebarContent = (
     <>
-      <div className="p-6 border-b border-[#16A34A]">
+      <div className="p-6 border-b border-[#047857]">
         <Link to="/" className="text-xl font-bold" onClick={() => setIsMobileMenuOpen(false)}>
           <span className="text-white">Mow</span>
           <span className="text-[#86EFAC]">List</span>
@@ -36,11 +35,11 @@ export default function DashboardLayout() {
         )}
       </div>
       {/* Book Service button - always visible, prominent */}
-      <div className="p-4 border-b border-[#16A34A]">
+      <div className="p-4 border-b border-[#047857]">
         <Link
           to="/book"
           onClick={() => setIsMobileMenuOpen(false)}
-          className="flex items-center justify-center gap-2 w-full bg-white text-[#16A34A] px-4 py-3 rounded-lg font-semibold hover:bg-green-50 transition-colors shadow-sm"
+          className="flex items-center justify-center gap-2 w-full bg-white text-[#047857] px-4 py-3 rounded-lg font-semibold hover:bg-green-50 transition-colors shadow-sm"
         >
           <Plus size={20} />
           Book a Service
@@ -63,7 +62,7 @@ export default function DashboardLayout() {
           </Link>
         ))}
       </nav>
-      <div className="p-4 border-t border-[#16A34A]">
+      <div className="p-4 border-t border-[#047857]">
         <button
           onClick={handleSignOut}
           className="w-full flex items-center gap-3 px-4 py-3 text-green-50 hover:bg-white/10 rounded-lg transition-colors text-left"
@@ -77,11 +76,10 @@ export default function DashboardLayout() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <Header />
-      {/* Mobile menu button - fixed top right below header */}
+      {/* Mobile menu button - fixed top right */}
       <button
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-        className="md:hidden fixed top-20 right-4 z-40 bg-white border border-slate-200 rounded-lg p-2 shadow-sm"
+        className="md:hidden fixed top-4 right-4 z-40 bg-white border border-slate-200 rounded-lg p-2 shadow-sm"
         aria-label="Toggle menu"
       >
         {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
@@ -94,7 +92,7 @@ export default function DashboardLayout() {
           onClick={() => setIsMobileMenuOpen(false)}
         >
           <aside
-            className="w-64 bg-[#22C55E] text-white h-full relative flex flex-col"
+            className="w-64 bg-[#059669] text-white h-full relative flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {sidebarContent}
@@ -103,7 +101,7 @@ export default function DashboardLayout() {
       )}
 
       {/* Desktop sidebar - always visible */}
-      <aside className="w-64 bg-[#22C55E] text-white hidden md:block fixed h-full flex flex-col">
+      <aside className="w-64 bg-[#059669] text-white hidden md:block fixed h-full flex flex-col">
         {sidebarContent}
       </aside>
 

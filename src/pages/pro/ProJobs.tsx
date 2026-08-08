@@ -684,11 +684,24 @@ function AvailableJobCard({
 
       <div className="p-4">
         <div className="flex items-start justify-between mb-3">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900">{job.customer_name || 'Customer'}</h3>
-            <div className="flex items-center gap-1 text-slate-500 text-sm mt-1">
-              <MapPin size={14} />
-              {formatAddress(job)}
+          <div className="flex items-center gap-3">
+            {job.customer_avatar_url ? (
+              <img
+                src={job.customer_avatar_url}
+                alt={job.customer_name || 'Customer'}
+                className="w-10 h-10 rounded-full object-cover border border-slate-200"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#22C55E] to-[#1E40AF] text-white font-semibold flex items-center justify-center text-sm">
+                {(job.customer_name || '?').charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">{job.customer_name || 'Customer'}</h3>
+              <div className="flex items-center gap-1 text-slate-500 text-sm mt-1">
+                <MapPin size={14} />
+                {formatAddress(job)}
+              </div>
             </div>
           </div>
           <button
