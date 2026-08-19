@@ -3,7 +3,6 @@ import type {
   Address,
   Booking,
   BookingRequest,
-  QuoteRequest,
   ProviderProfile,
   ServiceArea,
   Payment,
@@ -76,68 +75,10 @@ export async function getCustomerBookingRequests(customerId: string): Promise<{ 
   }
 }
 
-// ============ QUOTE REQUESTS ============
-
-export async function createQuoteRequest(request: Partial<QuoteRequest>): Promise<{ data: QuoteRequest | null; error: Error | null }> {
-  try {
-    const { data, error } = await supabase
-      .from('quote_requests')
-      .insert(request)
-      .select()
-      .single()
-
-    if (error) throw error
-    return { data, error: null }
-  } catch (error) {
-    return { data: null, error: error as Error }
-  }
-}
-
-export async function getCustomerQuoteRequests(customerId: string): Promise<{ data: QuoteRequest[]; error: Error | null }> {
-  try {
-    const { data, error } = await supabase
-      .from('quote_requests')
-      .select('*')
-      .eq('customer_id', customerId)
-      .order('created_at', { ascending: false })
-
-    if (error) throw error
-    return { data: data || [], error: null }
-  } catch (error) {
-    return { data: [], error: error as Error }
-  }
-}
-
-export async function getPendingQuoteRequests(): Promise<{ data: QuoteRequest[]; error: Error | null }> {
-  try {
-    const { data, error } = await supabase
-      .from('quote_requests')
-      .select('*')
-      .eq('status', 'submitted')
-      .order('created_at', { ascending: false })
-
-    if (error) throw error
-    return { data: data || [], error: null }
-  } catch (error) {
-    return { data: [], error: error as Error }
-  }
-}
-
-export async function updateQuoteRequest(id: string, updates: Partial<QuoteRequest>): Promise<{ data: QuoteRequest | null; error: Error | null }> {
-  try {
-    const { data, error } = await supabase
-      .from('quote_requests')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single()
-
-    if (error) throw error
-    return { data, error: null }
-  } catch (error) {
-    return { data: null, error: error as Error }
-  }
-}
+// Note: the 'custom quote' flow has been removed — all bookings now use
+// the standard booking flow with a fixed price from the yard-size selector.
+// The quote_requests table still exists in the DB but is no longer
+// written to or read from.
 
 // ============ BOOKINGS ============
 
@@ -300,7 +241,8 @@ export async function updateBookingStatus(bookingId: string, status: BookingStat
 export async function uploadJobPhoto(
   bookingId: string,
   photoType: 'before' | 'during' | 'after' | 'issue' | 'completion',
-  file: File
+  file: File,
+  addonId: string | null = null
 ): Promise<{ data: { url: string } | null; error: Error | null }> {
   try {
     // Validate file
@@ -370,7 +312,7 @@ export async function uploadJobPhoto(
       await supabase.from('booking_photos').insert({
         booking_id: bookingId,
         photo_role: photoType,
-        addon_id: null,
+        addon_id: addonId,
         photo_url: url,
         uploaded_by: user.id,
       }).then(({ error: insErr }) => {
@@ -753,7 +695,10 @@ export async function getProviderEarnings(providerId: string): Promise<{ data: {
     const { data: payouts } = await supabase
       .from('payouts')
       .select('amount, status')
-      .eq('provider_id', profile.id)
+      // Was `profile.id` — `profile` doesn't exist in this scope, so every call
+      // threw a ReferenceError that the catch below swallowed, and Pro Earnings
+      // silently reported $0 total / $0 pending / $0 paid for everyone.
+      .eq('provider_id', profileId)
 
     const pending = payouts?.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0) || 0
     const paid = payouts?.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0) || 0
@@ -821,7 +766,6 @@ export async function getAdminStats(): Promise<{
   data: {
     totalBookings: number
     activeProviders: number
-    pendingQuotes: number
     totalRevenue: number
   }
   error: Error | null
@@ -838,12 +782,6 @@ export async function getAdminStats(): Promise<{
       .select('*', { count: 'exact', head: true })
       .eq('is_available', true)
 
-    // Pending quote requests
-    const { count: pendingQuotes } = await supabase
-      .from('quote_requests')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'submitted')
-
     // Total revenue (from completed payments)
     const { data: payments } = await supabase
       .from('payments')
@@ -856,7 +794,6 @@ export async function getAdminStats(): Promise<{
       data: {
         totalBookings: totalBookings || 0,
         activeProviders: activeProviders || 0,
-        pendingQuotes: pendingQuotes || 0,
         totalRevenue,
       },
       error: null,
@@ -866,7 +803,6 @@ export async function getAdminStats(): Promise<{
       data: {
         totalBookings: 0,
         activeProviders: 0,
-        pendingQuotes: 0,
         totalRevenue: 0,
       },
       error: error as Error,
@@ -1105,31 +1041,41 @@ export async function getReviewsForProvider(
   limit: number = 50
 ): Promise<{ data: Review[]; error: Error | null }> {
   try {
+    // Step 1: Get the reviews (no joins — avoids FK hint errors)
     const { data, error } = await supabase
       .from('reviews')
-      .select(`
-        id, booking_id, customer_id, provider_id, rating, comment,
-        dispute_status, dispute_reason, pro_rating_of_customer,
-        pro_private_feedback, created_at, updated_at,
-        customer:users!reviews_customer_id_fkey(id, email),
-        customer_profile:customer_profiles!reviews_customer_id_fkey(first_name, last_name, avatar_url)
-      `)
+      .select('id, booking_id, customer_id, provider_id, rating, comment, dispute_status, dispute_reason, pro_rating_of_customer, pro_private_feedback, created_at, updated_at')
       .eq('provider_id', providerId)
       .neq('dispute_status', 'upheld')
       .order('created_at', { ascending: false })
       .limit(limit)
 
     if (error) throw error
+    if (!data || data.length === 0) return { data: [], error: null }
 
-    // Hydrate customer_name
+    // Step 2: Hydrate customer names + avatars in a separate query
+    // (customer_profiles.user_id = reviews.customer_id, not a direct FK)
+    const customerIds = [...new Set(data.map((r: any) => r.customer_id).filter(Boolean))]
+    let profileMap = new Map<string, any>()
+    if (customerIds.length > 0) {
+      const { data: profiles, error: pErr } = await supabase
+        .from('customer_profiles')
+        .select('user_id, first_name, last_name, avatar_url')
+        .in('user_id', customerIds)
+      if (!pErr && profiles) {
+        profileMap = new Map(profiles.map((p: any) => [p.user_id, p]))
+      }
+    }
+
+    // Step 3: Merge
     const hydrated = (data || []).map((r: any) => {
-      const profile = r.customer_profile
+      const profile = profileMap.get(r.customer_id)
       const fullName = profile
         ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim()
         : ''
       return {
         ...r,
-        customer_name: fullName || r.customer?.email?.split('@')[0] || 'Customer',
+        customer_name: fullName || 'Customer',
         customer_avatar_url: profile?.avatar_url || null,
       }
     })
@@ -1387,45 +1333,99 @@ export async function getEscrowStatus(
  * Customer approves the job. Triggers immediate payment capture.
  * Sets customer_approved_at + status = 'completed' + payment_status = 'captured'.
  */
+/**
+ * Wrap a promise with a hard timeout. If it doesn't resolve in `ms` ms,
+ * reject with a clear timeout error instead of hanging forever.
+ */
+function withTimeout<T>(p: PromiseLike<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    ),
+  ])
+}
+
 export async function customerApproveBooking(
   bookingId: string
-): Promise<{ error: Error | null }> {
+): Promise<{ data: any | null; error: Error | null }> {
+  const log = (msg: string, extra?: any) =>
+    console.log(`[approve] ${msg}`, extra ?? '')
   try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { error: new Error('Not signed in') }
+    log('starting', { bookingId })
+    const { data: { user } } = await withTimeout(
+      supabase.auth.getUser(),
+      8000,
+      'auth.getUser'
+    )
+    if (!user) return { data: null, error: new Error('Not signed in') }
+    log('got user', { userId: user.id })
 
     // Verify the booking belongs to this customer
-    const { data: booking, error: bErr } = await supabase
-      .from('bookings')
-      .select('customer_id, booking_status, payment_status')
-      .eq('id', bookingId)
-      .single()
+    const { data: booking, error: bErr } = await withTimeout(
+      supabase
+        .from('bookings')
+        .select('customer_id, booking_status, payment_status')
+        .eq('id', bookingId)
+        .single(),
+      8000,
+      'fetch booking'
+    )
+    log('fetched booking', { booking, bErr })
 
     if (bErr) throw bErr
     if (booking?.customer_id !== user.id) {
-      return { error: new Error('Not your booking') }
+      return { data: null, error: new Error('Not your booking') }
     }
     if (booking.booking_status !== 'pending_review') {
-      return { error: new Error('Booking is not awaiting review') }
+      return { data: null, error: new Error('Booking is not awaiting review') }
     }
 
-    // Mark approved
-    const { error } = await supabase
-      .from('bookings')
-      .update({
-        customer_approved_at: new Date().toISOString(),
-        reviewed_at: new Date().toISOString(),
-        booking_status: 'completed',
-        payment_status: 'captured',
-        payment_captured_at: new Date().toISOString(),
-        completed_at: new Date().toISOString(),
-      })
-      .eq('id', bookingId)
+    // Mark the booking as approved + completed in the DB. We deliberately
+    // do NOT touch payment_status here — the pg_cron job will flip it to
+    // 'captured' after the actual Stripe API call succeeds. Trying to set
+    // payment_status ourselves risks hitting a CHECK constraint (different
+    // bookings are in different states: requires_capture, authorized, pending,
+    // etc.) and failing the whole approval, which is the worst possible UX.
+    //
+    // IMPORTANT: the `.select()` is not cosmetic. Without it, a Postgres RLS
+    // policy that filters this row out makes the UPDATE match ZERO rows and
+    // still return `error: null` — a silent no-op. Selecting the row back
+    // means we can tell "updated" from "silently blocked" and surface a real
+    // error instead of a UI that pretends it worked.
+    const { data: updated, error } = await withTimeout(
+      supabase
+        .from('bookings')
+        .update({
+          customer_approved_at: new Date().toISOString(),
+          reviewed_at: new Date().toISOString(),
+          booking_status: 'completed',
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', bookingId)
+        .select('id, booking_status, completed_at, customer_approved_at')
+        .maybeSingle(),
+      10000,
+      'update booking'
+    )
 
-    if (error) throw error
-    return { error: null }
+    if (error) {
+      log('update error', error)
+      throw error
+    }
+    if (!updated) {
+      log('update matched 0 rows — RLS is blocking the customer UPDATE')
+      throw new Error(
+        "We couldn't record your approval. Your payment has NOT been released. " +
+        'Please refresh and try again — if it keeps happening, contact support ' +
+        '(error: booking update blocked).'
+      )
+    }
+    log('success', updated)
+    return { data: updated, error: null }
   } catch (err) {
-    return { error: err as Error }
+    log('caught error', err)
+    return { data: null, error: err as Error }
   }
 }
 
@@ -1436,8 +1436,13 @@ export async function customerDisputeBooking(
   bookingId: string,
   reason: string
 ): Promise<{ error: Error | null }> {
+  const log = (msg: string, extra?: any) =>
+    console.log(`[dispute] ${msg}`, extra ?? '')
   try {
-    const { data: { user } } = await supabase.auth.getUser()
+    log('starting', { bookingId })
+    const { data: { user } } = await withTimeout(
+      supabase.auth.getUser(), 8000, 'auth.getUser'
+    )
     if (!user) return { error: new Error('Not signed in') }
 
     const trimmed = reason.trim()
@@ -1445,11 +1450,16 @@ export async function customerDisputeBooking(
       return { error: new Error('Please describe the issue (at least 10 characters)') }
     }
 
-    const { data: booking, error: bErr } = await supabase
-      .from('bookings')
-      .select('customer_id, booking_status')
-      .eq('id', bookingId)
-      .single()
+    const { data: booking, error: bErr } = await withTimeout(
+      supabase
+        .from('bookings')
+        .select('customer_id, booking_status')
+        .eq('id', bookingId)
+        .single(),
+      8000,
+      'fetch booking'
+    )
+    log('fetched booking', { booking, bErr })
 
     if (bErr) throw bErr
     if (booking?.customer_id !== user.id) {
@@ -1459,16 +1469,55 @@ export async function customerDisputeBooking(
       return { error: new Error('Can only dispute bookings in review') }
     }
 
-    const { error } = await supabase
-      .from('bookings')
-      .update({
-        booking_status: 'disputed',
-        reviewed_at: new Date().toISOString(),
-        notes: trimmed,  // append dispute reason to notes
-      })
-      .eq('id', bookingId)
+    // 1. First do the critical update: set status to 'disputed' + stamp
+    //    reviewed_at. These two columns are guaranteed to exist.
+    //    `.select()` is required so a row filtered out by RLS surfaces as an
+    //    error instead of a silent zero-row no-op (see customerApproveBooking).
+    const { data: updated, error } = await withTimeout(
+      supabase
+        .from('bookings')
+        .update({
+          booking_status: 'disputed',
+          reviewed_at: new Date().toISOString(),
+        })
+        .eq('id', bookingId)
+        .select('id, booking_status')
+        .maybeSingle(),
+      10000,
+      'update booking'
+    )
 
-    if (error) throw error
+    if (error) {
+      log('update error', error)
+      throw error
+    }
+    if (!updated) {
+      log('update matched 0 rows — RLS is blocking the customer UPDATE')
+      throw new Error(
+        "We couldn't file your dispute. Your payment is still held and has NOT " +
+        'been released. Please refresh and try again — if it keeps happening, ' +
+        'contact support (error: booking update blocked).'
+      )
+    }
+    log('success', updated)
+
+    // 2. Best-effort: save the dispute reason to migration-26 columns.
+    //    If migration 26 hasn't been run yet, this errors silently and the
+    //    dispute still goes through (status is already 'disputed' from step 1).
+    //    We use a separate query so a column-missing error doesn't block the
+    //    whole dispute.
+    supabase
+      .from('bookings')
+      .update({ dispute_reason: trimmed, disputed_at: new Date().toISOString() })
+      .eq('id', bookingId)
+      .then(() => null)
+      .catch(() => null)
+
+    // 3. Bump dispute count via RPC (soft-fail if it doesn't exist yet)
+    supabase.rpc('increment_dispute_count', { p_booking_id: bookingId })
+      .then(() => null)
+      .catch(() => null)
+
     return { error: null }
   } catch (err) {
     return { error: err as Error }

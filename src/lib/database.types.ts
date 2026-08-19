@@ -36,6 +36,9 @@ export interface ProviderProfile {
   onboarding_status: 'pending' | 'in_progress' | 'completed'
   verification_status: 'pending' | 'verified' | 'rejected'
   stripe_connect_account_id: string | null
+  stripe_connect_charges_enabled?: boolean | null
+  stripe_connect_payouts_enabled?: boolean | null
+  stripe_connect_onboarding_complete?: boolean | null
   payout_status: 'pending' | 'active' | 'disabled'
   is_available: boolean
   created_at: string
@@ -171,6 +174,10 @@ export interface BookingPhoto {
   caption: string | null
   uploaded_by: string
   uploaded_at: string
+  /** 'before' | 'after' | 'extra' — added by migration 24 (photo_role). */
+  photo_role?: string | null
+  /** Which add-on this photo documents; null = the base mow. Migration 24. */
+  addon_id?: string | null
 }
 
 export type PayoutStatus = 'pending' | 'in_transit' | 'paid' | 'failed' | 'cancelled'

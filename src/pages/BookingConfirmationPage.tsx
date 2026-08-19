@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Check, Calendar, MapPin, CreditCard, Download, Clock, Home, ArrowRight } from 'lucide-react'
+import { Check, Calendar, MapPin, CreditCard, Download, Clock, Home, ArrowRight, Shield, Lock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import AddonBadges from '../components/AddonBadges'
 
@@ -39,7 +39,10 @@ export default function BookingConfirmationPage() {
       .from('payments')
       .select('receipt_url')
       .eq('booking_id', realBookingId)
-      .eq('status', 'succeeded')
+      // Payments are 'authorized' until the job is approved and captured.
+      // Filtering on 'succeeded' (not a valid status here) matched nothing, so
+      // the Stripe receipt link never appeared.
+      .in('status', ['authorized', 'captured'])
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
@@ -309,6 +312,23 @@ export default function BookingConfirmationPage() {
           <Link to="/" className="text-[#22C55E] font-medium hover:underline">
             Return to Home
           </Link>
+        </div>
+
+        {/* Home safety notice — short, friendly, doesn't lecture. Reassures
+            customer that the pro is just doing the booked outdoor work and
+            shouldn't be entering the home. Common-sense nudge to lock up. */}
+        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
+          <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+            <Shield className="text-blue-600" size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-blue-900 text-sm">A quick safety note</p>
+            <p className="text-sm text-blue-800 mt-1">
+              Your pro will only do the work you booked — MowList pros never
+              enter your home. If you'll be away, please lock all doors and
+              gates. You can track your pro in real-time from your dashboard.
+            </p>
+          </div>
         </div>
       </div>
     </div>

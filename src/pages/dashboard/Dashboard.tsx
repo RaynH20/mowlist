@@ -5,8 +5,8 @@ import {
   Loader2, AlertCircle, FileText, CreditCard, TrendingUp,
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
-import { getCustomerBookings, getCustomerQuoteRequests } from '../../lib/api'
-import type { Booking, QuoteRequest } from '../../lib/database.types'
+import { getCustomerBookings } from '../../lib/api'
+import type { Booking } from '../../lib/database.types'
 import ProAvatar from '../../components/ProAvatar'
 
 // Friendly labels for the enum values
@@ -31,6 +31,7 @@ const STATUS_LABELS: Record<string, string> = {
   on_the_way: 'Pro On The Way',
   arrived: 'Pro Arrived',
   in_progress: 'In Progress',
+  pending_review: 'Needs Your Approval',
   completed: 'Completed',
   cancelled: 'Cancelled',
   disputed: 'Disputed',
@@ -44,6 +45,7 @@ const STATUS_COLORS: Record<string, string> = {
   on_the_way: 'bg-amber-100 text-amber-700',
   arrived: 'bg-amber-100 text-amber-700',
   in_progress: 'bg-amber-100 text-amber-700',
+  pending_review: 'bg-yellow-100 text-yellow-800',
   completed: 'bg-green-100 text-green-700',
   cancelled: 'bg-red-100 text-red-700',
   disputed: 'bg-orange-100 text-orange-700',
@@ -76,7 +78,6 @@ function isThisMonth(booking: Booking): boolean {
 export default function Dashboard() {
   const { user } = useAuth()
   const [bookings, setBookings] = useState<Booking[]>([])
-  const [quoteRequests, setQuoteRequests] = useState<QuoteRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   // First name for personalized greeting. All hooks must be declared before
@@ -92,14 +93,10 @@ export default function Dashboard() {
       setLoading(true)
       setError(null)
       try {
-        const [bookingsRes, quotesRes] = await Promise.all([
-          getCustomerBookings(user.id),
-          getCustomerQuoteRequests(user.id),
-        ])
+        const bookingsRes = await getCustomerBookings(user.id)
         if (cancelled) return
         if (bookingsRes.error) setError(bookingsRes.error.message)
         else setBookings(bookingsRes.data || [])
-        setQuoteRequests(quotesRes.data || [])
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load dashboard')
@@ -165,16 +162,48 @@ export default function Dashboard() {
   const thisMonthBookings = bookings.filter(isThisMonth)
   const totalSpent = bookings.reduce((sum, b) => sum + (b.estimated_price || 0), 0)
   const completedBookings = bookings.filter((b) => b.booking_status === 'completed')
-  const openQuotes = quoteRequests.filter((q) => ['submitted', 'under_review', 'quoted'].includes(q.status))
   const nextBooking = upcomingBookings.sort((a, b) => {
     if (!a.scheduled_date) return 1
     if (!b.scheduled_date) return -1
     return a.scheduled_date.localeCompare(b.scheduled_date)
   })[0]
-  const isFirstTime = !hasBookings && openQuotes.length === 0
+  const isFirstTime = !hasBookings
+  // Jobs the pro has finished that are sitting in the 24h review window. If the
+  // customer never opens Track Service, the payment auto-releases without them
+  // ever seeing the photos — so this gets top billing on the dashboard.
+  const awaitingApproval = bookings.filter((b) => b.booking_status === 'pending_review')
 
   return (
     <div>
+      {/* Action needed — 24h review window is ticking */}
+      {awaitingApproval.length > 0 && (
+        <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-300 rounded-xl p-4 mb-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center flex-shrink-0">
+              <AlertCircle className="text-white" size={20} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h2 className="font-semibold text-amber-900">
+                {awaitingApproval.length === 1
+                  ? 'A job is waiting for your approval'
+                  : `${awaitingApproval.length} jobs are waiting for your approval`}
+              </h2>
+              <p className="text-sm text-amber-800 mt-0.5">
+                Review the photos and approve to release payment. If you don't act within
+                24 hours, payment is released automatically.
+              </p>
+              <Link
+                to={`/dashboard/track?booking=${awaitingApproval[0].id}`}
+                className="inline-flex items-center gap-1.5 mt-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-700 transition-colors"
+              >
+                Review now
+                <ArrowRight size={14} />
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Greeting */}
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-slate-900">
@@ -186,31 +215,6 @@ export default function Dashboard() {
             : 'Ready to get your lawn taken care of?'}
         </p>
       </div>
-
-      {/* Needs attention: open quote requests */}
-      {openQuotes.length > 0 && (
-        <Link
-          to="/dashboard/services"
-          className="block bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 mb-4 hover:border-blue-400 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-              <FileText className="text-[#1E40AF]" size={20} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-slate-900 text-sm">
-                {openQuotes.length === 1 ? '1 quote pending review' : `${openQuotes.length} quotes pending review`}
-              </p>
-              <p className="text-xs text-slate-600 mt-0.5">
-                {openQuotes[0].status === 'quoted' && openQuotes[0].quoted_price != null
-                  ? `Quote ready: $${openQuotes[0].quoted_price.toFixed(0)} — tap to view`
-                  : "We're reviewing your property and will be in touch"}
-              </p>
-            </div>
-            <ArrowRight className="text-[#1E40AF] flex-shrink-0" size={18} />
-          </div>
-        </Link>
-      )}
 
       {/* Stats grid */}
       {hasBookings && (
@@ -291,7 +295,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between">
             <span className="text-2xl font-bold">${nextBooking.estimated_price}</span>
             <Link
-              to="/dashboard/track"
+              to={`/dashboard/track?booking=${nextBooking.id}`}
               className="inline-flex items-center gap-1 bg-white text-[#22C55E] px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-green-50 transition-colors"
             >
               Track it

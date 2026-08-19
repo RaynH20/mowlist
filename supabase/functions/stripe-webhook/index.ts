@@ -4,6 +4,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
+// Keep in sync with create-payment-intent / capture-payment.
+const PLATFORM_FEE_PERCENT = 15 // MowList takes 15%
+
 const STRIPE_SECRET_KEY = Deno.env.get('STRIPE_SECRET_KEY')
 const STRIPE_WEBHOOK_SECRET = Deno.env.get('STRIPE_WEBHOOK_SECRET')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
@@ -149,6 +152,54 @@ serve(async (req) => {
   try {
     // Handle specific event types
     switch (event.type) {
+      // MowList authorizes the card up front and captures after the customer
+      // approves the work. With capture_method: 'manual', Stripe fires
+      // `amount_capturable_updated` at authorization time and only fires
+      // `payment_intent.succeeded` later, at capture. Both need handling:
+      // authorization is when the booking becomes paid-for and trackable.
+      case 'payment_intent.amount_capturable_updated': {
+        const pi = event.data.object
+        const bookingId = pi.metadata?.booking_id
+        const userId = pi.metadata?.mowlist_user_id
+
+        const totalAmount = pi.amount / 100
+        const platformFeeCents = Math.round(pi.amount * PLATFORM_FEE_PERCENT / 100)
+        const platformFee = platformFeeCents / 100
+        const proPayout = (pi.amount - platformFeeCents) / 100
+
+        await supabaseAdmin.from('payments').upsert(
+          {
+            booking_id: bookingId,
+            customer_id: userId,
+            stripe_payment_intent_id: pi.id,
+            stripe_charge_id: pi.latest_charge,
+            stripe_payment_method_id: pi.payment_method,
+            amount: totalAmount,
+            platform_fee: platformFee,
+            pro_payout_amount: proPayout,
+            currency: pi.currency,
+            status: 'authorized',
+            payment_method_type: pi.payment_method_types?.[0] || null,
+            metadata_json: pi.metadata || {},
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'stripe_payment_intent_id' }
+        )
+
+        if (bookingId) {
+          await supabaseAdmin
+            .from('bookings')
+            .update({
+              payment_intent_id: pi.id,
+              payment_status: 'authorized',
+              platform_fee: platformFee,
+              provider_payout_amount: proPayout,
+            })
+            .eq('id', bookingId)
+        }
+        break
+      }
+
       case 'payment_intent.succeeded': {
         const pi = event.data.object
         const bookingId = pi.metadata?.booking_id
@@ -177,8 +228,12 @@ serve(async (req) => {
         // (application_fee_amount + transfer_data[destination]). For direct
         // MowList payments (no connected pro), the entire amount is the
         // platform's revenue — pro_payout_amount stays 0.
+        // MowList uses separate charges and transfers, so there is no
+        // `application_fee_amount` on the PaymentIntent — it used to be read
+        // straight off the PI, which meant platform_fee was always $0 and the
+        // pro's payout was recorded as the full ticket price.
         const totalAmount = pi.amount / 100
-        const platformFeeCents = pi.application_fee_amount || 0
+        const platformFeeCents = Math.round(pi.amount * PLATFORM_FEE_PERCENT / 100)
         const platformFee = platformFeeCents / 100
         const proPayout = (pi.amount - platformFeeCents) / 100
 
@@ -194,7 +249,10 @@ serve(async (req) => {
             platform_fee: platformFee,
             pro_payout_amount: proPayout,
             currency: pi.currency,
-            status: 'succeeded',
+            // 'succeeded' is not one of the allowed payment statuses
+            // (pending / authorized / captured / failed / refunded /
+            // partially_refunded) — writing it silently failed the insert.
+            status: 'captured',
             payment_method_type: pi.payment_method_types?.[0] || null,
             receipt_url: receiptUrl,
             metadata_json: pi.metadata || {},
@@ -208,16 +266,18 @@ serve(async (req) => {
         // from bookings.provider_payout_amount). Only flip booking_status if
         // it's in 'provider_assigned' so we don't clobber in-progress jobs.
         if (bookingId) {
+          // 'paid' is not an allowed payment_status value — this whole update
+          // was being rejected by the CHECK constraint, so captured payments
+          // never showed up on the booking.
           await supabaseAdmin
             .from('bookings')
             .update({
-              payment_status: 'paid',
-              booking_status: 'booked',
+              payment_status: 'captured',
+              payment_captured_at: new Date().toISOString(),
               platform_fee: platformFee,
               provider_payout_amount: proPayout,
             })
             .eq('id', bookingId)
-            .eq('booking_status', 'provider_assigned')
         }
 
         // Belt-and-suspenders: explicitly attach the payment method to the customer

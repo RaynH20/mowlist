@@ -1,0 +1,2499 @@
+From 56afc3f67e3b3af219e8833dc3de04481809de8f Mon Sep 17 00:00:00 2001
+From: "Claude (Cowork)" <noreply@anthropic.com>
+Date: Tue, 18 Aug 2026 03:37:51 +0000
+Subject: [PATCH] fix: approve/dispute RLS no-op, payment capture, and pro
+ payouts
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The "Approve & Release Payment" bug was never a caching problem — the
+bookings table has no customer UPDATE RLS policy, so the UPDATE matched
+zero rows and PostgREST returned success. Fixed at both ends.
+
+Database (run in Supabase SQL Editor):
+- 2026-08-18_customer_booking_update_rls.sql: adds the missing customer
+  UPDATE policy plus a guardrail trigger so customers can only approve,
+  dispute or cancel — never touch price, payment status or assignment.
+- 2026-08-18_payment_plumbing.sql: adds bookings.payment_intent_id,
+  payment_captured_at, stripe_transfer_id, provider_paid_at; backfills
+  payment_intent_id; repairs the payments.status constraint.
+- DIAGNOSE.sql: read-only script to confirm live DB state.
+
+Payments:
+- create-payment-intent now writes payment_intent_id onto the booking.
+  Nothing ever did, so capture-payment always failed with "No payment
+  intent on this booking" and authorized funds expired uncollected.
+- Switched pro payouts from destination charges to separate charges and
+  transfers. transfer_data needs the pro at PaymentIntent creation, but
+  pros are assigned after payment — so every payout went to the platform
+  account. capture-payment now creates an idempotent Transfer at capture.
+- CheckoutPage treated only 'succeeded' as success; manual capture lands
+  on 'requires_capture', so real bookings showed a payment error.
+- Fixed invalid enum writes: payment_status 'paid' and payments.status
+  'succeeded' both violate CHECK constraints; yard_size_category 'medium'
+  is not a valid category.
+- stripe-webhook now handles payment_intent.amount_capturable_updated
+  (authorization) and computes the platform fee itself.
+
+Customer UI:
+- Approve/dispute have separate callbacks. Disputing used to call the
+  "mark completed" handler, so a dispute rendered as Completed.
+- Approved jobs stay pinned on Track Service instead of vanishing.
+- Re-attached RateYourProSection and DisputedWaitingSection, orphaned by
+  the CustomerJobCard refactor, plus live tracking and before/after
+  photos which were no longer being passed to the status tracker.
+- Jobs awaiting review are surfaced on the dashboard and My Services so
+  the 24h auto-release window can't run out unseen.
+
+Pro side:
+- getProviderEarnings referenced an undefined `profile`, so Pro Earnings
+  reported $0 for everyone.
+- Removed dead AssignedJobCard.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_0149iXkX2TFSUkgua9goYatV
+---
+ .gitignore                                    |   2 +
+ src/components/CustomerJobCard.tsx            |  60 +-
+ src/components/DisputedWaitingSection.tsx     |  72 ++
+ src/components/RateYourProSection.tsx         | 101 +++
+ src/components/ReviewAndApproveSection.tsx    |  34 +-
+ src/lib/api.ts                                |  57 +-
+ src/lib/database.types.ts                     |   7 +
+ src/pages/BookingConfirmationPage.tsx         |   5 +-
+ src/pages/CheckoutPage.tsx                    |  25 +-
+ src/pages/dashboard/Dashboard.tsx             |  35 +
+ src/pages/dashboard/MyServices.tsx            |  48 +-
+ src/pages/dashboard/TrackService.tsx          | 663 +++---------------
+ src/pages/pro/ProJobs.tsx                     | 235 +------
+ supabase/DIAGNOSE.sql                         |  91 +++
+ supabase/functions/capture-payment/index.ts   | 107 ++-
+ .../functions/create-payment-intent/index.ts  |  44 +-
+ supabase/functions/stripe-webhook/index.ts    |  70 +-
+ ...2026-08-18_customer_booking_update_rls.sql | 107 +++
+ .../2026-08-18_payment_plumbing.sql           |  63 ++
+ 19 files changed, 952 insertions(+), 874 deletions(-)
+ create mode 100644 src/components/DisputedWaitingSection.tsx
+ create mode 100644 src/components/RateYourProSection.tsx
+ create mode 100644 supabase/DIAGNOSE.sql
+ create mode 100644 supabase/migrations/2026-08-18_customer_booking_update_rls.sql
+ create mode 100644 supabase/migrations/2026-08-18_payment_plumbing.sql
+
+diff --git a/.gitignore b/.gitignore
+index 556cd6e..da5840f 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -27,3 +27,5 @@ dist-ssr
+ *.njsproj
+ *.sln
+ *.sw?
++
++package-lock.json
+diff --git a/src/components/CustomerJobCard.tsx b/src/components/CustomerJobCard.tsx
+index ecc2bc4..2e5b503 100644
+--- a/src/components/CustomerJobCard.tsx
++++ b/src/components/CustomerJobCard.tsx
+@@ -10,14 +10,19 @@ import CustomerPhotoViewer from './CustomerPhotoViewer'
+ import AddonBadges from './AddonBadges'
+ import BookingStatusTracker from './BookingStatusTracker'
+ import ReviewAndApproveSection from './ReviewAndApproveSection'
++import DisputedWaitingSection from './DisputedWaitingSection'
++import RateYourProSection from './RateYourProSection'
++import ErrorBoundary from './ErrorBoundary'
++import { markBookingAsReviewed } from '../lib/api'
+ 
+ interface CustomerJobCardProps {
+   booking: Booking
+   address?: Address | null
+   expanded: boolean
+   onToggle: () => void
+-  onAction?: () => void  // re-fetch callback after mutations
+-  onApproved?: () => void  // optimistic-update: flip this booking to completed in parent state
++  onAction?: () => void  // generic re-fetch callback after mutations
++  onApproved?: () => void  // flip this booking to completed in parent state
++  onDisputed?: () => void  // flip this booking to disputed in parent state
+ }
+ 
+ const STATUS_BADGE: Record<string, { bg: string; text: string; label?: string }> = {
+@@ -52,6 +57,7 @@ export default function CustomerJobCard({
+   onToggle,
+   onAction,
+   onApproved,
++  onDisputed,
+ }: CustomerJobCardProps) {
+   const badge = STATUS_BADGE[booking.booking_status] || { bg: 'bg-slate-100', text: 'text-slate-700' }
+   const badgeLabel = badge.label || formatBookingStatus(booking.booking_status)
+@@ -72,6 +78,14 @@ export default function CustomerJobCard({
+     ? `${address.street_1.split(',')[0].split(' ').slice(0, 4).join(' ')}${address.city ? `, ${address.city}` : ''}`
+     : null
+ 
++  // Stamp `reviewed_at` the first time the customer actually opens a job that's
++  // awaiting their review. (Analytics only — it doesn't change the status.)
++  useEffect(() => {
++    if (expanded && isPendingReview && !(booking as any).reviewed_at) {
++      markBookingAsReviewed(booking.id).catch(() => {})
++    }
++  }, [expanded, isPendingReview, booking])
++
+   // Status color for the left border bar (the only color signal on the card)
+   const STATUS_BORDER: Record<string, string> = {
+     requested:        'border-l-orange-500',
+@@ -163,12 +177,23 @@ export default function CustomerJobCard({
+           {/* Status tracker + photos + approve/dispute UI.
+               The tracker handles its own context (disputed vs pending_review vs
+               completed) so we just pass the booking through. */}
+-          <BookingStatusTracker
+-            status={booking.booking_status as any}
+-            bookingId={booking.id}
+-            address={address ?? null}
+-            selectedAddons={(booking as any).selected_addons}
+-          />
++          <ErrorBoundary name={`Tracker-${booking.id}`}>
++            <BookingStatusTracker
++              status={booking.booking_status as any}
++              bookingId={booking.id}
++              address={address ?? null}
++              selectedAddons={(booking as any).selected_addons}
++              scheduledDate={booking.scheduled_date}
++              scheduledTimeWindow={booking.scheduled_time_window}
++              beforePhotoUrl={booking.before_photo_url}
++              afterPhotoUrl={booking.after_photo_url}
++              proLat={(booking as any).pro_lat}
++              proLng={(booking as any).pro_lng}
++              hasActiveTracking={['on_the_way', 'arrived', 'in_progress'].includes(
++                booking.booking_status
++              )}
++            />
++          </ErrorBoundary>
+ 
+           {/* Addons */}
+           {Array.isArray((booking as any).selected_addons) && (booking as any).selected_addons.length > 0 && (
+@@ -181,12 +206,29 @@ export default function CustomerJobCard({
+           {/* 24h escrow review window — pro marked the job done, customer's turn.
+               Shown directly inside the card so the review/approve controls are
+               one tap away from the photos above. */}
+-          {isPendingReview && (booking as any).provider_id && onAction && (
++          {isPendingReview && (booking as any).provider_id && (onApproved || onAction) && (
+             <ReviewAndApproveSection
+               booking={booking}
+               proName={(booking as any).provider_name || 'your pro'}
+               onAction={onAction}
+               onApproved={onApproved}
++              onDisputed={onDisputed}
++            />
++          )}
++
++          {/* Disputed — customer is waiting for the pro to re-do the work. */}
++          {isDisputed && (
++            <DisputedWaitingSection
++              booking={booking}
++              proName={(booking as any).provider_name || 'your pro'}
++            />
++          )}
++
++          {/* Completed — ask for a rating. */}
++          {isCompleted && (booking as any).provider_id && (
++            <RateYourProSection
++              booking={booking}
++              proName={(booking as any).provider_name || 'your pro'}
+             />
+           )}
+         </div>
+diff --git a/src/components/DisputedWaitingSection.tsx b/src/components/DisputedWaitingSection.tsx
+new file mode 100644
+index 0000000..b26e2f9
+--- /dev/null
++++ b/src/components/DisputedWaitingSection.tsx
+@@ -0,0 +1,72 @@
++import { AlertCircle, Clock, Shield } from 'lucide-react'
++
++/**
++ * Shown when booking status is 'disputed' — the customer filed a dispute and is
++ * waiting for the pro to re-fix the issue. No action buttons; just a clear
++ * status explaining what's happening and when to expect an update.
++ *
++ * The pro sees the dispute reason on their side and is expected to either
++ * re-do the work (which puts the booking back in pending_review with a fresh
++ * 24h window) or contact the customer to resolve.
++ *
++ * NOTE: this used to live inside TrackService.tsx, where it was orphaned by the
++ * CustomerJobCard refactor and never rendered. It now lives with the card.
++ */
++export default function DisputedWaitingSection({
++  booking,
++  proName,
++}: {
++  booking: any
++  proName: string
++}) {
++  const disputeAge = booking.disputed_at
++    ? Math.floor((Date.now() - new Date(booking.disputed_at).getTime()) / 3_600_000)
++    : 0
++
++  return (
++    <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-5">
++      <div className="flex items-start gap-3 mb-3">
++        <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0">
++          <AlertCircle className="text-white" size={20} />
++        </div>
++        <div className="flex-1 min-w-0">
++          <h3 className="font-semibold text-red-900">You've disputed this job</h3>
++          <p className="text-sm text-red-800 mt-1">
++            We notified {proName} about the issue. They're expected to re-do the
++            work and send it back for your review.
++          </p>
++        </div>
++      </div>
++
++      {booking.dispute_reason && (
++        <div className="bg-white border border-red-200 rounded-lg p-3 mb-3">
++          <p className="text-xs font-semibold text-slate-600 mb-1">Your reason:</p>
++          <p className="text-sm text-slate-800 italic">"{booking.dispute_reason}"</p>
++        </div>
++      )}
++
++      <div className="flex flex-wrap items-center gap-4 text-xs text-red-700">
++        <span className="flex items-center gap-1">
++          <Clock size={12} />
++          Disputed {disputeAge === 0 ? 'today' : `${disputeAge}h ago`}
++        </span>
++        <span className="flex items-center gap-1">
++          <Shield size={12} />
++          Payment held in escrow
++        </span>
++        {booking.dispute_count > 1 && (
++          <span className="flex items-center gap-1 text-amber-700">
++            <AlertCircle size={12} />
++            Re-opened {booking.dispute_count} times
++          </span>
++        )}
++      </div>
++
++      <p className="text-xs text-red-700 mt-3 italic">
++        You'll get a fresh 24-hour review window when the pro sends the corrected
++        version back. If they don't respond within 48 hours, our support team
++        will step in.
++      </p>
++    </div>
++  )
++}
+diff --git a/src/components/RateYourProSection.tsx b/src/components/RateYourProSection.tsx
+new file mode 100644
+index 0000000..9aa8093
+--- /dev/null
++++ b/src/components/RateYourProSection.tsx
+@@ -0,0 +1,101 @@
++import { useEffect, useState } from 'react'
++import { getReviewForBooking, type Review } from '../lib/api'
++import ReviewForm from './ReviewForm'
++import FavoriteButton from './FavoriteButton'
++
++/**
++ * Shown only for completed bookings with an assigned pro.
++ * - If the customer hasn't reviewed yet: prompts them to rate.
++ * - If they have: shows their review with an "Edit" link.
++ * Also shows the "Save to favorites" button.
++ *
++ * NOTE: this used to live inside TrackService.tsx, where it was orphaned by the
++ * CustomerJobCard refactor — meaning customers had no way to review a pro from
++ * the Track Service page at all. It now lives with the card.
++ */
++export default function RateYourProSection({
++  booking,
++  proName,
++}: {
++  booking: any
++  proName: string
++}) {
++  const [showForm, setShowForm] = useState(false)
++  const [review, setReview] = useState<Review | null>(null)
++  const [loaded, setLoaded] = useState(false)
++
++  useEffect(() => {
++    let cancelled = false
++    getReviewForBooking(booking.id).then((res) => {
++      if (cancelled) return
++      setReview(res.data)
++      setLoaded(true)
++    })
++    return () => { cancelled = true }
++  }, [booking.id])
++
++  return (
++    <div className="border-t border-slate-200 pt-4">
++      <div className="flex items-center gap-2 mb-3">
++        <span className="text-lg">⭐</span>
++        <h4 className="text-sm font-semibold text-slate-900">How was {proName}?</h4>
++      </div>
++
++      {!loaded ? (
++        <div className="h-12 bg-slate-50 rounded-lg animate-pulse" />
++      ) : review ? (
++        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
++          <div className="flex items-center gap-2 mb-1">
++            <div className="flex">
++              {[1, 2, 3, 4, 5].map((i) => (
++                <span key={i} className={i <= review.rating ? 'text-amber-400' : 'text-slate-300'}>
++                  ★
++                </span>
++              ))}
++            </div>
++            <span className="text-xs text-emerald-700 font-medium">Your review</span>
++          </div>
++          {review.comment && (
++            <p className="text-sm text-slate-700 mt-1 whitespace-pre-line">{review.comment}</p>
++          )}
++          <div className="flex items-center gap-3 mt-2 pt-2 border-t border-emerald-200">
++            <button
++              onClick={() => setShowForm(true)}
++              className="text-xs text-emerald-700 font-medium hover:underline"
++            >
++              Edit
++            </button>
++            <FavoriteButton providerId={booking.provider_id} variant="compact" />
++          </div>
++        </div>
++      ) : (
++        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
++          <p className="text-sm text-amber-900 mb-2">
++            Reviews help other customers find great pros. Takes 30 seconds.
++          </p>
++          <div className="flex flex-wrap items-center gap-2">
++            <button
++              onClick={() => setShowForm(true)}
++              className="inline-flex items-center gap-1.5 bg-[#22C55E] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#16A34A] transition-colors"
++            >
++              ★ Rate this pro
++            </button>
++            <FavoriteButton providerId={booking.provider_id} variant="compact" />
++          </div>
++        </div>
++      )}
++
++      {showForm && (
++        <ReviewForm
++          bookingId={booking.id}
++          proName={proName}
++          existingReview={review ? { rating: review.rating, comment: review.comment } : null}
++          onClose={() => setShowForm(false)}
++          onSubmitted={() => {
++            getReviewForBooking(booking.id).then((res) => setReview(res.data))
++          }}
++        />
++      )}
++    </div>
++  )
++}
+diff --git a/src/components/ReviewAndApproveSection.tsx b/src/components/ReviewAndApproveSection.tsx
+index 57df973..9d5f205 100644
+--- a/src/components/ReviewAndApproveSection.tsx
++++ b/src/components/ReviewAndApproveSection.tsx
+@@ -20,14 +20,16 @@ export default function ReviewAndApproveSection({
+   proName,
+   onAction,
+   onApproved,
++  onDisputed,
+ }: {
+   booking: any
+   proName: string
+-  onAction: () => void
+-  /** Optional: optimistic-update callback. Flips the parent state to
+-   * mark this booking as completed immediately, bypassing the re-fetch
+-   * (Supabase PostgREST sometimes returns stale data on the next SELECT). */
++  /** Generic refresh. Only used when the specific callback below is absent. */
++  onAction?: () => void
++  /** Flip this booking to `completed` in the parent's state. */
+   onApproved?: () => void
++  /** Flip this booking to `disputed` in the parent's state. */
++  onDisputed?: () => void
+ }) {
+   const [approving, setApproving] = useState(false)
+   const [disputing, setDisputing] = useState(false)
+@@ -69,18 +71,12 @@ export default function ReviewAndApproveSection({
+       setError(err.message)
+       return
+     }
+-    console.log('[approve] handleApprove: success, calling onAction (mark as completed)')
+-    // Just call onAction — it's now wired directly to markBookingCompleted
+-    // which updates the local state. The DB has been updated; the local
+-    // state now reflects it. We deliberately don't re-fetch from Supabase
+-    // because PostgREST returns stale data on the next SELECT after an
+-    // UPDATE (CDN/edge cache), which overwrites the local flip.
+-    try {
+-      await onAction()
+-    } catch (e) {
+-      console.warn('onAction threw', e)
+-    }
+-    console.log('[approve] handleApprove: done')
++    // The DB write is now verified — customerApproveBooking selects the row
++    // back and errors if the UPDATE matched zero rows. So a success here
++    // means the booking really is `completed` server-side, and we can flip
++    // the parent's state directly without a re-fetch.
++    if (onApproved) onApproved()
++    else onAction?.()
+   }
+ 
+   const handleDispute = async () => {
+@@ -98,7 +94,11 @@ export default function ReviewAndApproveSection({
+     }
+     setShowDisputeForm(false)
+     setDisputeSubmitted(true)
+-    onAction()
++    // Previously this called onAction(), which on the Track Service page was
++    // wired to "mark this booking completed" — so filing a dispute made the
++    // card show as Completed. Dispute now has its own callback.
++    if (onDisputed) onDisputed()
++    else onAction?.()
+   }
+ 
+   return (
+diff --git a/src/lib/api.ts b/src/lib/api.ts
+index 14ef192..86287ea 100644
+--- a/src/lib/api.ts
++++ b/src/lib/api.ts
+@@ -695,7 +695,10 @@ export async function getProviderEarnings(providerId: string): Promise<{ data: {
+     const { data: payouts } = await supabase
+       .from('payouts')
+       .select('amount, status')
+-      .eq('provider_id', profile.id)
++      // Was `profile.id` — `profile` doesn't exist in this scope, so every call
++      // threw a ReferenceError that the catch below swallowed, and Pro Earnings
++      // silently reported $0 total / $0 pending / $0 paid for everyone.
++      .eq('provider_id', profileId)
+ 
+     const pending = payouts?.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0) || 0
+     const paid = payouts?.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0) || 0
+@@ -1345,7 +1348,7 @@ function withTimeout<T>(p: PromiseLike<T>, ms: number, label: string): Promise<T
+ 
+ export async function customerApproveBooking(
+   bookingId: string
+-): Promise<{ error: Error | null }> {
++): Promise<{ data: any | null; error: Error | null }> {
+   const log = (msg: string, extra?: any) =>
+     console.log(`[approve] ${msg}`, extra ?? '')
+   try {
+@@ -1355,7 +1358,7 @@ export async function customerApproveBooking(
+       8000,
+       'auth.getUser'
+     )
+-    if (!user) return { error: new Error('Not signed in') }
++    if (!user) return { data: null, error: new Error('Not signed in') }
+     log('got user', { userId: user.id })
+ 
+     // Verify the booking belongs to this customer
+@@ -1372,10 +1375,10 @@ export async function customerApproveBooking(
+ 
+     if (bErr) throw bErr
+     if (booking?.customer_id !== user.id) {
+-      return { error: new Error('Not your booking') }
++      return { data: null, error: new Error('Not your booking') }
+     }
+     if (booking.booking_status !== 'pending_review') {
+-      return { error: new Error('Booking is not awaiting review') }
++      return { data: null, error: new Error('Booking is not awaiting review') }
+     }
+ 
+     // Mark the booking as approved + completed in the DB. We deliberately
+@@ -1384,7 +1387,13 @@ export async function customerApproveBooking(
+     // payment_status ourselves risks hitting a CHECK constraint (different
+     // bookings are in different states: requires_capture, authorized, pending,
+     // etc.) and failing the whole approval, which is the worst possible UX.
+-    const { error } = await withTimeout(
++    //
++    // IMPORTANT: the `.select()` is not cosmetic. Without it, a Postgres RLS
++    // policy that filters this row out makes the UPDATE match ZERO rows and
++    // still return `error: null` — a silent no-op. Selecting the row back
++    // means we can tell "updated" from "silently blocked" and surface a real
++    // error instead of a UI that pretends it worked.
++    const { data: updated, error } = await withTimeout(
+       supabase
+         .from('bookings')
+         .update({
+@@ -1393,7 +1402,9 @@ export async function customerApproveBooking(
+           booking_status: 'completed',
+           completed_at: new Date().toISOString(),
+         })
+-        .eq('id', bookingId),
++        .eq('id', bookingId)
++        .select('id, booking_status, completed_at, customer_approved_at')
++        .maybeSingle(),
+       10000,
+       'update booking'
+     )
+@@ -1402,11 +1413,19 @@ export async function customerApproveBooking(
+       log('update error', error)
+       throw error
+     }
+-    log('success')
+-    return { error: null }
++    if (!updated) {
++      log('update matched 0 rows — RLS is blocking the customer UPDATE')
++      throw new Error(
++        "We couldn't record your approval. Your payment has NOT been released. " +
++        'Please refresh and try again — if it keeps happening, contact support ' +
++        '(error: booking update blocked).'
++      )
++    }
++    log('success', updated)
++    return { data: updated, error: null }
+   } catch (err) {
+     log('caught error', err)
+-    return { error: err as Error }
++    return { data: null, error: err as Error }
+   }
+ }
+ 
+@@ -1452,14 +1471,18 @@ export async function customerDisputeBooking(
+ 
+     // 1. First do the critical update: set status to 'disputed' + stamp
+     //    reviewed_at. These two columns are guaranteed to exist.
+-    const { error } = await withTimeout(
++    //    `.select()` is required so a row filtered out by RLS surfaces as an
++    //    error instead of a silent zero-row no-op (see customerApproveBooking).
++    const { data: updated, error } = await withTimeout(
+       supabase
+         .from('bookings')
+         .update({
+           booking_status: 'disputed',
+           reviewed_at: new Date().toISOString(),
+         })
+-        .eq('id', bookingId),
++        .eq('id', bookingId)
++        .select('id, booking_status')
++        .maybeSingle(),
+       10000,
+       'update booking'
+     )
+@@ -1468,7 +1491,15 @@ export async function customerDisputeBooking(
+       log('update error', error)
+       throw error
+     }
+-    log('success')
++    if (!updated) {
++      log('update matched 0 rows — RLS is blocking the customer UPDATE')
++      throw new Error(
++        "We couldn't file your dispute. Your payment is still held and has NOT " +
++        'been released. Please refresh and try again — if it keeps happening, ' +
++        'contact support (error: booking update blocked).'
++      )
++    }
++    log('success', updated)
+ 
+     // 2. Best-effort: save the dispute reason to migration-26 columns.
+     //    If migration 26 hasn't been run yet, this errors silently and the
+diff --git a/src/lib/database.types.ts b/src/lib/database.types.ts
+index 4bb1617..2d3d9e7 100644
+--- a/src/lib/database.types.ts
++++ b/src/lib/database.types.ts
+@@ -36,6 +36,9 @@ export interface ProviderProfile {
+   onboarding_status: 'pending' | 'in_progress' | 'completed'
+   verification_status: 'pending' | 'verified' | 'rejected'
+   stripe_connect_account_id: string | null
++  stripe_connect_charges_enabled?: boolean | null
++  stripe_connect_payouts_enabled?: boolean | null
++  stripe_connect_onboarding_complete?: boolean | null
+   payout_status: 'pending' | 'active' | 'disabled'
+   is_available: boolean
+   created_at: string
+@@ -171,6 +174,10 @@ export interface BookingPhoto {
+   caption: string | null
+   uploaded_by: string
+   uploaded_at: string
++  /** 'before' | 'after' | 'extra' — added by migration 24 (photo_role). */
++  photo_role?: string | null
++  /** Which add-on this photo documents; null = the base mow. Migration 24. */
++  addon_id?: string | null
+ }
+ 
+ export type PayoutStatus = 'pending' | 'in_transit' | 'paid' | 'failed' | 'cancelled'
+diff --git a/src/pages/BookingConfirmationPage.tsx b/src/pages/BookingConfirmationPage.tsx
+index d0565d4..3a59fe3 100644
+--- a/src/pages/BookingConfirmationPage.tsx
++++ b/src/pages/BookingConfirmationPage.tsx
+@@ -39,7 +39,10 @@ export default function BookingConfirmationPage() {
+       .from('payments')
+       .select('receipt_url')
+       .eq('booking_id', realBookingId)
+-      .eq('status', 'succeeded')
++      // Payments are 'authorized' until the job is approved and captured.
++      // Filtering on 'succeeded' (not a valid status here) matched nothing, so
++      // the Stripe receipt link never appeared.
++      .in('status', ['authorized', 'captured'])
+       .order('created_at', { ascending: false })
+       .limit(1)
+       .maybeSingle()
+diff --git a/src/pages/CheckoutPage.tsx b/src/pages/CheckoutPage.tsx
+index b313997..6d86509 100644
+--- a/src/pages/CheckoutPage.tsx
++++ b/src/pages/CheckoutPage.tsx
+@@ -210,7 +210,17 @@ function CheckoutForm() {
+         paymentIntent = pi
+       }
+ 
+-      if (paymentIntent?.status === 'succeeded') {
++      // MowList authorizes the card now and captures later (pay-on-completion),
++      // so a successful confirmation lands on `requires_capture`, NOT
++      // `succeeded`. Treating only `succeeded` as success made every real
++      // booking show "Payment status: requires_capture" to the customer even
++      // though their card had been authorized correctly.
++      const authorized =
++        paymentIntent?.status === 'requires_capture' ||
++        paymentIntent?.status === 'succeeded' ||
++        paymentIntent?.status === 'processing'
++
++      if (authorized) {
+         // If this is a brand-new booking (legacy flow with passedFormData),
+         // create the address and booking now that payment succeeded.
+         // If this is an existing booking (the pro already accepted), the
+@@ -238,9 +248,12 @@ function CheckoutForm() {
+               geocode_source: geocoded?.source ?? null,
+             } as any)
+             if (address) {
++              // yard_size_category has a CHECK constraint that only allows
++              // small / standard / large / custom_quote — 'medium' is not a
++              // valid value and silently failed the whole insert.
+               const sizeMap: Record<string, string> = {
+                 small: 'small',
+-                medium: 'medium',
++                medium: 'standard',
+                 large: 'large',
+                 standard: 'standard',
+                 'custom-quote': 'custom_quote',
+@@ -254,14 +267,18 @@ function CheckoutForm() {
+               await createBooking({
+                 customer_id: user.id,
+                 address_id: address.id,
+-                yard_size_category: (sizeMap[lawnSize] || 'medium') as any,
++                yard_size_category: (sizeMap[lawnSize] || 'standard') as any,
+                 service_type: 'lawn_mowing',
+                 service_frequency: (freqMap[passedFormData.frequency] || 'one_time') as any,
+                 scheduled_date: passedFormData.date || null,
+                 scheduled_time_window: passedFormData.time || null,
+                 estimated_price: total,
+                 booking_status: 'booked',
+-                payment_status: 'paid',
++                // 'paid' is not an allowed payment_status (the CHECK allows
++                // pending / authorized / captured / failed / refunded /
++                // partially_refunded). The card is authorized at this point;
++                // capture happens after the customer approves the work.
++                payment_status: 'authorized',
+                 notes: passedFormData.specialInstructions || null,
+               })
+             }
+diff --git a/src/pages/dashboard/Dashboard.tsx b/src/pages/dashboard/Dashboard.tsx
+index f77476e..d4b1883 100644
+--- a/src/pages/dashboard/Dashboard.tsx
++++ b/src/pages/dashboard/Dashboard.tsx
+@@ -31,6 +31,7 @@ const STATUS_LABELS: Record<string, string> = {
+   on_the_way: 'Pro On The Way',
+   arrived: 'Pro Arrived',
+   in_progress: 'In Progress',
++  pending_review: 'Needs Your Approval',
+   completed: 'Completed',
+   cancelled: 'Cancelled',
+   disputed: 'Disputed',
+@@ -44,6 +45,7 @@ const STATUS_COLORS: Record<string, string> = {
+   on_the_way: 'bg-amber-100 text-amber-700',
+   arrived: 'bg-amber-100 text-amber-700',
+   in_progress: 'bg-amber-100 text-amber-700',
++  pending_review: 'bg-yellow-100 text-yellow-800',
+   completed: 'bg-green-100 text-green-700',
+   cancelled: 'bg-red-100 text-red-700',
+   disputed: 'bg-orange-100 text-orange-700',
+@@ -166,9 +168,42 @@ export default function Dashboard() {
+     return a.scheduled_date.localeCompare(b.scheduled_date)
+   })[0]
+   const isFirstTime = !hasBookings
++  // Jobs the pro has finished that are sitting in the 24h review window. If the
++  // customer never opens Track Service, the payment auto-releases without them
++  // ever seeing the photos — so this gets top billing on the dashboard.
++  const awaitingApproval = bookings.filter((b) => b.booking_status === 'pending_review')
+ 
+   return (
+     <div>
++      {/* Action needed — 24h review window is ticking */}
++      {awaitingApproval.length > 0 && (
++        <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-300 rounded-xl p-4 mb-4">
++          <div className="flex items-start gap-3">
++            <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center flex-shrink-0">
++              <AlertCircle className="text-white" size={20} />
++            </div>
++            <div className="flex-1 min-w-0">
++              <h2 className="font-semibold text-amber-900">
++                {awaitingApproval.length === 1
++                  ? 'A job is waiting for your approval'
++                  : `${awaitingApproval.length} jobs are waiting for your approval`}
++              </h2>
++              <p className="text-sm text-amber-800 mt-0.5">
++                Review the photos and approve to release payment. If you don't act within
++                24 hours, payment is released automatically.
++              </p>
++              <Link
++                to={`/dashboard/track?booking=${awaitingApproval[0].id}`}
++                className="inline-flex items-center gap-1.5 mt-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-700 transition-colors"
++              >
++                Review now
++                <ArrowRight size={14} />
++              </Link>
++            </div>
++          </div>
++        </div>
++      )}
++
+       {/* Greeting */}
+       <div className="mb-5">
+         <h1 className="text-2xl font-bold text-slate-900">
+diff --git a/src/pages/dashboard/MyServices.tsx b/src/pages/dashboard/MyServices.tsx
+index cc9cd6a..c313cd1 100644
+--- a/src/pages/dashboard/MyServices.tsx
++++ b/src/pages/dashboard/MyServices.tsx
+@@ -91,6 +91,13 @@ export default function MyServices() {
+   const openQuotes: never[] = []
+   const pastQuotes: never[] = []
+ 
++  // NEEDS REVIEW: the pro marked the job done and the 24h clock is running.
++  // These must never be buried — if the customer doesn't act, the payment
++  // auto-releases. Pulled from the full list (not activeServices) because a job
++  // finished yesterday isn't "upcoming" and would otherwise land in Past.
++  const needsReview = bookings.filter((b) => b.booking_status === 'pending_review')
++  const needsReviewIds = new Set(needsReview.map((b) => b.id))
++
+   // ACTIVE NOW: jobs happening right now (the pro is on their way, on-site, or mowing)
+   const ACTIVE_NOW_STATUSES = ['on_the_way', 'arrived', 'in_progress', 'mowing']
+   const activeNow = activeServices.filter((b) => ACTIVE_NOW_STATUSES.includes(b.booking_status))
+@@ -103,15 +110,19 @@ export default function MyServices() {
+     b.completed_at && new Date(b.completed_at) >= sevenDaysAgo
+   )
+ 
+-  // UPCOMING: future scheduled services (not active now)
+-  const upcoming = activeServices.filter((b) => !ACTIVE_NOW_STATUSES.includes(b.booking_status))
++  // UPCOMING: future scheduled services (not active now, not awaiting review)
++  const upcoming = activeServices.filter(
++    (b) => !ACTIVE_NOW_STATUSES.includes(b.booking_status) && !needsReviewIds.has(b.id)
++  )
+ 
+   // PAST: cancelled, refunded, or completed > 7 days ago
+   const olderCompleted = bookings.filter(
+     (b) => b.booking_status === 'completed' &&
+     (!b.completed_at || new Date(b.completed_at) < sevenDaysAgo)
+   )
+-  const pastOnly = pastServices.filter((b) => b.booking_status !== 'completed')
++  const pastOnly = pastServices.filter(
++    (b) => b.booking_status !== 'completed' && !needsReviewIds.has(b.id)
++  )
+   const allPast = [...pastOnly, ...olderCompleted]
+ 
+   const isEmpty = bookings.length === 0
+@@ -137,7 +148,36 @@ export default function MyServices() {
+         </div>
+       ) : (
+         <>
+-          {/* ============ 1. PENDING QUOTES (stays in limbo at top) ============ */}
++          {/* ============ 1. NEEDS YOUR REVIEW (24h clock is running) ============ */}
++          {needsReview.length > 0 && (
++            <div className="mb-8">
++              <div className="flex items-center gap-2 mb-3">
++                <div className="w-7 h-7 bg-amber-500 rounded-full flex items-center justify-center">
++                  <AlertCircle className="text-white" size={16} />
++                </div>
++                <h2 className="text-lg font-semibold text-slate-900">Needs Your Review</h2>
++                <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-medium">
++                  {needsReview.length}
++                </span>
++              </div>
++              <p className="text-sm text-slate-500 mb-3">
++                Approve to release payment, or dispute if something's wrong. Payment
++                releases automatically 24 hours after the pro marks a job done.
++              </p>
++              <div className="space-y-3">
++                {needsReview.map((booking) => (
++                  <Link key={booking.id} to={`/dashboard/track?booking=${booking.id}`} className="block">
++                    <CustomerJobCard
++                      booking={booking}
++                      address={(booking as any).address}
++                      expanded={false}
++                      onToggle={() => {}}
++                    />
++                  </Link>
++                ))}
++              </div>
++            </div>
++          )}
+ 
+           {/* ============ 2. ACTIVE NOW (happening right now) ============ */}
+           {activeNow.length > 0 && (
+diff --git a/src/pages/dashboard/TrackService.tsx b/src/pages/dashboard/TrackService.tsx
+index be3d001..18c729a 100644
+--- a/src/pages/dashboard/TrackService.tsx
++++ b/src/pages/dashboard/TrackService.tsx
+@@ -1,95 +1,34 @@
+ import { useEffect, useState, useMemo, useCallback } from 'react'
+ import { Link, useSearchParams } from 'react-router-dom'
+-import {
+-  Clock, MapPin, CheckCircle, Car, Calendar, Scissors, ArrowRight,
+-  Loader2, AlertCircle, Phone, MessageCircle, Camera, Package,
+-  ChevronDown, ChevronUp,
+-} from 'lucide-react'
++import { Loader2, AlertCircle, Calendar, Scissors, ArrowRight } from 'lucide-react'
+ import { useAuth } from '../../lib/auth-context'
+-import { getCustomerBookings, getUserAddresses, getReviewForBooking, customerApproveBooking, customerDisputeBooking, markBookingAsReviewed, type Review } from '../../lib/api'
+-import ReviewForm from '../../components/ReviewForm'
+-import FavoriteButton from '../../components/FavoriteButton'
++import { getCustomerBookings, getUserAddresses } from '../../lib/api'
+ import type { Booking, Address } from '../../lib/database.types'
+-import BookingStatusTracker from '../../components/BookingStatusTracker'
+ import CustomerJobCard from '../../components/CustomerJobCard'
+-import ReviewAndApproveSection from '../../components/ReviewAndApproveSection'
+-import ErrorBoundary from '../../components/ErrorBoundary'
+ 
+-const YARD_SIZE_LABELS: Record<string, string> = {
+-  small: 'Small Yard',
+-  standard: 'Medium Yard',
+-  large: 'Large Yard',
+-  custom_quote: 'Custom Quote',
+-}
+-
+-// Statuses where the service is "in progress" — trackable live
++// Statuses where the service is "live" — i.e. worth tracking.
+ const ACTIVE_STATUSES: Record<string, boolean> = {
+   provider_assigned: true,
+   on_the_way: true,
+   arrived: true,
+   in_progress: true,
+   pending_review: true, // Customer must approve or dispute — keep visible
+-  disputed: true,        // Customer is waiting for pro to re-fix — keep visible
++  disputed: true,       // Customer is waiting for the pro to re-fix — keep visible
+ }
+ 
+-// Statuses that should be hidden from the Track Service page
++// Statuses that should never appear on the Track Service page.
+ const HIDDEN_STATUSES: Record<string, boolean> = {
+   cancelled: true,
+ }
+ 
+-const STATUS_LABELS: Record<string, string> = {
+-  booked: 'Booked',
+-  provider_assigned: 'Pro Assigned',
+-  on_the_way: 'On the Way',
+-  arrived: 'Arrived',
+-  in_progress: 'In Progress',
+-  completed: 'Completed',
+-}
+-
+-const STATUS_ICONS: Record<string, React.ReactNode> = {
+-  provider_assigned: <Package className="text-white" size={20} />,
+-  on_the_way: <Car className="text-white" size={20} />,
+-  arrived: <MapPin className="text-white" size={20} />,
+-  in_progress: <Scissors className="text-white" size={20} />,
+-}
+-
+-// Background color for the small status icon in each list row.
+-// Used as a quick visual cue so the customer can scan 30+ bookings and find
+-// the ones that need their attention without reading every label.
+-const STATUS_ICON_BG: Record<string, { bg: string; ring: string; text: string }> = {
+-  booked:              { bg: 'bg-emerald-500', ring: 'ring-emerald-200', text: 'text-white' },
+-  requested:           { bg: 'bg-orange-500',  ring: 'ring-orange-200',  text: 'text-white' },
+-  provider_assigned:   { bg: 'bg-blue-500',    ring: 'ring-blue-200',    text: 'text-white' },
+-  on_the_way:          { bg: 'bg-blue-600',    ring: 'ring-blue-200',    text: 'text-white' },
+-  arrived:             { bg: 'bg-indigo-500',  ring: 'ring-indigo-200',  text: 'text-white' },
+-  in_progress:         { bg: 'bg-cyan-500',    ring: 'ring-cyan-200',    text: 'text-white' },
+-  pending_review:      { bg: 'bg-yellow-500',  ring: 'ring-yellow-300',  text: 'text-white' }, // ⚠ needs action
+-  completed:           { bg: 'bg-slate-400',   ring: 'ring-slate-200',   text: 'text-white' },
+-  cancelled:           { bg: 'bg-slate-300',   ring: 'ring-slate-200',   text: 'text-white' },
+-  disputed:            { bg: 'bg-red-500',     ring: 'ring-red-200',     text: 'text-white' },
+-  refunded:            { bg: 'bg-slate-400',   ring: 'ring-slate-200',   text: 'text-white' },
+-}
+-
+-function formatDate(iso: string | null): string {
+-  if (!iso) return 'TBD'
+-  const d = new Date(iso + 'T00:00:00')
+-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+-}
+-
+-function isToday(iso: string | null): boolean {
+-  if (!iso) return false
+-  const today = new Date()
+-  today.setHours(0, 0, 0, 0)
+-  const d = new Date(iso + 'T00:00:00')
+-  return d.getTime() === today.getTime()
+-}
+-
++/**
++ * Track Service focuses on LIVE tracking — jobs that are booked, in progress,
++ * or awaiting the customer's review. Completed and past jobs live on My
++ * Services instead, which keeps the two pages distinct:
++ *   - Track Service = what's happening now + what's coming up
++ *   - My Services   = your full booking history
++ */
+ function isActiveForTracking(b: Booking): boolean {
+-  // Track Service focuses on LIVE tracking — only show jobs that are
+-  // booked, in-progress, or awaiting review. Completed and past jobs
+-  // live on My Services instead. This keeps the two pages distinct:
+-  //   - Track Service = what's happening now + what's coming up
+-  //   - My Services   = your full booking history
+   if (HIDDEN_STATUSES[b.booking_status]) return false
+   if (b.booking_status === 'booked') return true
+   if (ACTIVE_STATUSES[b.booking_status]) return true
+@@ -102,19 +41,24 @@ export default function TrackService() {
+   const [addresses, setAddresses] = useState<Address[]>([])
+   const [loading, setLoading] = useState(true)
+   const [error, setError] = useState<string | null>(null)
+-  // Read ?booking=ID from URL to auto-open a specific booking
++  // Bookings the customer just approved/disputed on this page. Approving moves
++  // a booking to `completed`, which normally drops it off this page — that made
++  // the card silently vanish and looked like nothing had happened. Keeping it
++  // pinned for the rest of the visit lets the customer see the result (and
++  // leave a review) before it moves to My Services.
++  const [justActed, setJustActed] = useState<string[]>([])
++
++  // Read ?booking=ID from the URL to auto-open a specific booking
+   const [searchParams] = useSearchParams()
+   const urlBookingId = searchParams.get('booking')
+-  // Which booking the user is currently viewing the timeline for
+   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(urlBookingId)
+ 
+-  // Keep selectedBookingId in sync with the URL when the user navigates
+-  // here from a "Track it" link on the dashboard. Without this, useState's
+-  // initial value wins and the URL is ignored on subsequent visits.
++  // Keep selectedBookingId in sync with the URL when the user navigates here
++  // from a "Track it" link. Without this, useState's initial value wins and
++  // the URL is ignored on subsequent visits.
+   useEffect(() => {
+     if (urlBookingId && urlBookingId !== selectedBookingId) {
+       setSelectedBookingId(urlBookingId)
+-      // Scroll the matching card into view after a tick (it just mounted)
+       setTimeout(() => {
+         const el = document.getElementById(`track-card-${urlBookingId}`)
+         el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+@@ -123,72 +67,77 @@ export default function TrackService() {
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [urlBookingId])
+ 
+-  useEffect(() => {
+-    if (!user) return
+-    let cancelled = false
+-    fetchBookings()
+-    return () => { cancelled = true }
+-    // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [user])
+-
+-  // Re-fetch the customer's bookings + addresses. Used on mount AND after
+-  // any action that mutates a booking (approve / dispute / cancel) so the
+-  // UI reflects the new server state.
++  // Re-fetch the customer's bookings + addresses.
+   const fetchBookings = useCallback(async () => {
+-    console.log('[TrackService] fetchBookings called')
+     if (!user) return
+     setLoading(true)
+     setError(null)
+     try {
+-      const [{ data: bookingsData, error: bookingsError }, { data: addressesData }] = await Promise.all([
+-        getCustomerBookings(user.id),
+-        getUserAddresses(user.id),
+-      ])
+-      const statusCounts: Record<string, number> = {}
+-      bookingsData?.forEach(b => {
+-        statusCounts[b.booking_status] = (statusCounts[b.booking_status] || 0) + 1
+-      })
+-      console.log('[TrackService] fetched', { count: bookingsData?.length, statusCounts, bookingsError })
++      const [{ data: bookingsData, error: bookingsError }, { data: addressesData }] =
++        await Promise.all([getCustomerBookings(user.id), getUserAddresses(user.id)])
+       if (bookingsError) setError(bookingsError.message)
+       else setBookings(bookingsData || [])
+       setAddresses(addressesData || [])
+     } catch (err) {
+-      console.error('[TrackService] fetch error', err)
+       setError(err instanceof Error ? err.message : 'Failed to load service')
+     } finally {
+       setLoading(false)
+     }
+   }, [user])
+ 
++  useEffect(() => {
++    if (!user) return
++    fetchBookings()
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [user])
++
+   /**
+-   * Mark a booking as completed in local state. The DB has already been updated
+-   * (by customerApproveBooking) but Supabase's PostgREST sometimes returns
+-   * stale data on the next SELECT (likely a CDN/edge cache). Updating the
+-   * bookings array directly gives the customer immediate UI feedback.
++   * Apply a status change to local state after a *confirmed* server write.
++   * `customerApproveBooking` / `customerDisputeBooking` now select the updated
++   * row back and throw if the UPDATE matched zero rows, so by the time we get
++   * here the database really has changed — no re-fetch needed, and no risk of
++   * a read replica handing back the old row and undoing this.
+    */
+-  const markBookingCompleted = useCallback((bookingId: string) => {
+-    console.log('[TrackService] markBookingCompleted', bookingId)
+-    setBookings(prev =>
+-      prev.map(b =>
+-        b.id === bookingId
+-          ? {
+-              ...b,
+-              booking_status: 'completed',
+-              customer_approved_at: new Date().toISOString(),
+-              reviewed_at: new Date().toISOString(),
+-              completed_at: new Date().toISOString(),
+-            }
+-          : b
++  const applyLocalStatus = useCallback(
++    (bookingId: string, patch: Partial<Booking> & Record<string, any>) => {
++      setBookings((prev) =>
++        prev.map((b) => (b.id === bookingId ? { ...b, ...patch } : b))
+       )
+-    )
+-  }, [])
++      setJustActed((prev) => (prev.includes(bookingId) ? prev : [...prev, bookingId]))
++    },
++    []
++  )
++
++  const markBookingCompleted = useCallback(
++    (bookingId: string) => {
++      const now = new Date().toISOString()
++      applyLocalStatus(bookingId, {
++        booking_status: 'completed',
++        customer_approved_at: now,
++        reviewed_at: now,
++        completed_at: now,
++      } as any)
++    },
++    [applyLocalStatus]
++  )
++
++  const markBookingDisputed = useCallback(
++    (bookingId: string) => {
++      const now = new Date().toISOString()
++      applyLocalStatus(bookingId, {
++        booking_status: 'disputed',
++        reviewed_at: now,
++        disputed_at: now,
++      } as any)
++    },
++    [applyLocalStatus]
++  )
+ 
+-  // All bookings the user can track (booked / in-progress / completed).
+-  // useMemo must be declared BEFORE any early returns to keep hook order stable.
+   const trackableBookings = useMemo(
+-    () => bookings.filter(isActiveForTracking),
+-    [bookings]
++    () => bookings.filter((b) => isActiveForTracking(b) || justActed.includes(b.id)),
++    [bookings, justActed]
+   )
++
+   // Sort: in-progress first, then booked (by scheduled date asc), then completed
+   const sortedTrackable = useMemo(() => {
+     const score = (b: Booking): number => {
+@@ -199,7 +148,6 @@ export default function TrackService() {
+     return [...trackableBookings].sort((a, b) => {
+       const scoreDiff = score(a) - score(b)
+       if (scoreDiff !== 0) return scoreDiff
+-      // Within same bucket, earliest scheduled date first
+       const ad = a.scheduled_date || '9999-12-31'
+       const bd = b.scheduled_date || '9999-12-31'
+       return ad.localeCompare(bd)
+@@ -207,19 +155,14 @@ export default function TrackService() {
+   }, [trackableBookings])
+ 
+   // The currently-expanded booking, or null = nothing is expanded.
+-  // No default — clicking the first card to "close" it actually closes it.
+   const explicitlyExpanded = selectedBookingId
+     ? sortedTrackable.find((b) => b.id === selectedBookingId) || null
+     : null
+ 
+-  // If there's exactly one trackable booking, auto-expand it (nothing to
+-  // scroll through anyway). Multi-booking case stays all-collapsed until
+-  // the user picks one.
+-  const expandedBooking = explicitlyExpanded
+-    ?? (sortedTrackable.length === 1 ? sortedTrackable[0] : null)
+-
+-  // Backwards-compat alias for the empty-state code path below
+-  const activeBooking = expandedBooking
++  // With exactly one trackable booking, auto-expand it (nothing to scroll
++  // through anyway). Multi-booking stays all-collapsed until the user picks one.
++  const expandedBooking =
++    explicitlyExpanded ?? (sortedTrackable.length === 1 ? sortedTrackable[0] : null)
+ 
+   if (loading) {
+     return (
+@@ -238,15 +181,6 @@ export default function TrackService() {
+     )
+   }
+ 
+-  // All bookings the user can track (booked / in-progress / completed)
+-  // Note: the useMemo calls are above the early returns to keep hook order stable.
+-  const address = activeBooking
+-    ? addresses.find((a) => a.id === activeBooking.address_id)
+-    : null
+-
+-  // Empty state: only show if there are NO trackable bookings at all.
+-  // (Previously checked !activeBooking which was the expanded booking, but
+-  // that meant all-collapsed multi-booking pages also hit the empty state.)
+   if (sortedTrackable.length === 0) {
+     return (
+       <div>
+@@ -257,7 +191,8 @@ export default function TrackService() {
+           </div>
+           <h2 className="text-lg font-semibold text-slate-900 mb-2">No bookings to track</h2>
+           <p className="text-slate-600 mb-6">
+-            Once you book a service, you'll see its progress here — from "Booked" all the way through to "Completed."
++            Once you book a service, you'll see its progress here — from "Booked" all the way
++            through to "Completed."
+           </p>
+           <Link
+             to="/book"
+@@ -272,281 +207,6 @@ export default function TrackService() {
+     )
+   }
+ 
+-  // Build the timeline for a given booking (returns steps with done/current/pending status)
+-  const buildTimelineSteps = (status: string) => {
+-    const order = ['booked', 'provider_assigned', 'on_the_way', 'arrived', 'in_progress', 'completed']
+-    const labels: Record<string, { label: string; description: string }> = {
+-      booked: { label: 'Booked', description: 'Service scheduled' },
+-      provider_assigned: { label: 'Pro Assigned', description: 'Your pro accepted the job' },
+-      on_the_way: { label: 'On the Way', description: 'Heading to your location' },
+-      arrived: { label: 'Arrived', description: 'Pro is at your property' },
+-      in_progress: { label: 'In Progress', description: 'Service is being performed' },
+-      completed: { label: 'Completed', description: 'Service finished' },
+-    }
+-    const currentIdx = order.indexOf(status)
+-    return order.map((key, i) => {
+-      let stepStatus: 'done' | 'current' | 'pending' = 'pending'
+-      if (i < currentIdx) stepStatus = 'done'
+-      else if (i === currentIdx) stepStatus = 'current'
+-      return { key, label: labels[key].label, description: labels[key].description, status: stepStatus }
+-    })
+-  }
+-
+-  // Render the timeline block for a single booking (used inside expanded cards)
+-  const renderTimeline = (booking: Booking) => {
+-    const steps = buildTimelineSteps(booking.booking_status)
+-    return (
+-      <div className="relative pl-2">
+-        <div className="absolute left-[15px] top-2 bottom-2 w-0.5 bg-slate-200"></div>
+-        <div className="space-y-4">
+-          {steps.map((step, index) => (
+-            <div key={step.key} className="flex items-start gap-3 relative">
+-              <div
+-                className={`w-7 h-7 rounded-full flex items-center justify-center z-10 flex-shrink-0 ${
+-                  step.status === 'done'
+-                    ? 'bg-[#22C55E] text-white'
+-                    : step.status === 'current'
+-                      ? 'bg-[#22C55E] text-white ring-4 ring-green-100'
+-                      : 'bg-slate-200 text-slate-400'
+-                }`}
+-              >
+-                {step.status === 'done' ? <CheckCircle size={14} /> : index + 1}
+-              </div>
+-              <div className="flex-1 pt-0.5">
+-                <span className={`text-sm font-medium block ${step.status !== 'pending' ? 'text-slate-900' : 'text-slate-400'}`}>
+-                  {step.label}
+-                  {step.status === 'current' && (
+-                    <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+-                      Current
+-                    </span>
+-                  )}
+-                </span>
+-                <p className={`text-xs ${step.status !== 'pending' ? 'text-slate-600' : 'text-slate-400'}`}>
+-                  {step.description}
+-                </p>
+-              </div>
+-            </div>
+-          ))}
+-        </div>
+-      </div>
+-    )
+-  }
+-
+-  // Render the collapsed header for a booking card
+-  const renderCardHeader = (booking: Booking, isSelected: boolean) => {
+-    const isBooked = booking.booking_status === 'booked'
+-    const isCompleted = booking.booking_status === 'completed'
+-    const isPendingReview = booking.booking_status === 'pending_review'
+-    // Pull the address + pro name from already-loaded data so the row
+-    // tells the user which job is which without having to expand it.
+-    const bookingAddress = addresses.find((a) => a.id === booking.address_id)
+-    const shortAddress = bookingAddress
+-      ? `${bookingAddress.street_1.split(',')[0].split(' ').slice(0, 4).join(' ')}${bookingAddress.city ? `, ${bookingAddress.city}` : ''}`
+-      : null
+-    const proName = (booking as any).provider_name || null
+-    // Color-code the scissor icon per status so the customer can spot the
+-    // job that needs their attention without reading every label.
+-    const iconStyle = STATUS_ICON_BG[booking.booking_status] || STATUS_ICON_BG.booked
+-    return (
+-      <div className="flex items-center gap-3">
+-        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ring-2 ${
+-          isSelected ? `${iconStyle.bg} ${iconStyle.ring}` : `${iconStyle.bg} ring-transparent`
+-        }`}>
+-          <Scissors className="text-white" size={16} />
+-        </div>
+-        <div className="flex-1 min-w-0 text-left">
+-          <p className="font-medium text-slate-900 text-sm truncate">
+-            {proName
+-              ? proName
+-              : shortAddress || YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
+-          </p>
+-          <p className="text-xs text-slate-500 truncate">
+-            {booking.scheduled_date
+-              ? `${formatDate(booking.scheduled_date)}${booking.scheduled_time_window ? ' · ' + booking.scheduled_time_window : ''}${shortAddress ? ' · ' + shortAddress : ''}`
+-              : 'Date TBD'}
+-          </p>
+-        </div>
+-        <div className="text-right flex-shrink-0">
+-          <div className="text-sm font-semibold text-slate-900">
+-            ${booking.estimated_price}
+-          </div>
+-          <span
+-            className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium inline-block ${
+-              isPendingReview
+-                ? 'bg-yellow-100 text-yellow-800'
+-                : isCompleted
+-                  ? 'bg-slate-100 text-slate-700'
+-                  : isBooked
+-                    ? 'bg-emerald-100 text-emerald-700'
+-                    : 'bg-blue-100 text-blue-700'
+-            }`}
+-          >
+-            {STATUS_LABELS[booking.booking_status] || booking.booking_status}
+-          </span>
+-        </div>
+-        {isSelected ? (
+-          <ChevronUp size={18} className="text-slate-400 flex-shrink-0" />
+-        ) : (
+-          <ChevronDown size={18} className="text-slate-400 flex-shrink-0" />
+-        )}
+-      </div>
+-    )
+-  }
+-
+-  // Render the expanded body for a booking card
+-  const renderCardBody = (booking: Booking) => {
+-    const isBooked = booking.booking_status === 'booked'
+-    const isCompleted = booking.booking_status === 'completed'
+-    const isPendingReview = booking.booking_status === 'pending_review'
+-    const bookingAddress = addresses.find((a) => a.id === booking.address_id)
+-
+-    // Mark the booking as reviewed the first time the customer opens it
+-    if (isPendingReview && !(booking as any).reviewed_at) {
+-      markBookingAsReviewed(booking.id).catch(() => {})
+-    }
+-
+-    return (
+-      <div className="mt-4 pt-4 border-t border-slate-200 space-y-4">
+-        {/* Service details */}
+-        <div className="grid gap-2 text-sm">
+-          <div className="flex items-center gap-2 text-slate-600">
+-            <MapPin className="text-[#22C55E] flex-shrink-0" size={14} />
+-            <span className="truncate">
+-              {bookingAddress
+-                ? `${bookingAddress.street_1}${bookingAddress.street_2 ? `, ${bookingAddress.street_2}` : ''}, ${bookingAddress.city}, ${bookingAddress.state} ${bookingAddress.zip_code}`
+-                : 'Service address'}
+-            </span>
+-          </div>
+-          <div className="flex items-center gap-2 text-slate-600">
+-            <Clock className="text-[#22C55E] flex-shrink-0" size={14} />
+-            <span>
+-              {formatDate(booking.scheduled_date)}
+-              {booking.scheduled_time_window && ` at ${booking.scheduled_time_window}`}
+-            </span>
+-          </div>
+-          <div className="flex items-center gap-2 text-slate-600">
+-            <Scissors className="text-[#22C55E] flex-shrink-0" size={14} />
+-            <span>${booking.estimated_price}</span>
+-          </div>
+-        </div>
+-
+-        {/* Status banner */}
+-        <div className={`rounded-lg p-3 flex items-center gap-3 ${
+-          isBooked ? 'bg-amber-50' : isCompleted ? 'bg-slate-50' : 'bg-blue-50'
+-        }`}>
+-          <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+-            isBooked ? 'bg-amber-500' : isCompleted ? 'bg-slate-500' : 'bg-blue-500'
+-          }`}>
+-            {isCompleted ? (
+-              <CheckCircle className="text-white" size={16} />
+-            ) : isBooked ? (
+-              <Clock className="text-white" size={16} />
+-            ) : (
+-              <Car className="text-white" size={16} />
+-            )}
+-          </div>
+-          <div>
+-            <p className={`text-xs font-medium ${
+-              isBooked ? 'text-amber-600' : isCompleted ? 'text-slate-600' : 'text-blue-600'
+-            }`}>
+-              {isBooked
+-                ? 'Waiting for a pro to accept'
+-                : isCompleted
+-                  ? 'Service complete'
+-                  : 'Live status'}
+-            </p>
+-            <p className={`text-sm font-semibold ${
+-              isBooked ? 'text-amber-700' : isCompleted ? 'text-slate-700' : 'text-blue-700'
+-            }`}>
+-              {STATUS_LABELS[booking.booking_status] || 'Scheduled'}
+-            </p>
+-          </div>
+-        </div>
+-
+-        {/* 24h escrow review window — pro marked the job done, customer's turn */}
+-        {isPendingReview && (booking as any).provider_id && (
+-          <ReviewAndApproveSection booking={booking} proName={(booking as any).provider_name || 'your pro'} onAction={() => fetchBookings()} />
+-        )}
+-
+-        {/* Disputed — customer is waiting for the pro to re-fix. Show a clear
+-            waiting state with the dispute reason + ETA. */}
+-        {booking.booking_status === 'disputed' && (
+-          <DisputedWaitingSection booking={booking} proName={(booking as any).provider_name || 'your pro'} />
+-        )}
+-
+-        {/* Rate your pro (only for completed bookings) */}
+-        {isCompleted && (booking as any).provider_id && (
+-          <RateYourProSection booking={booking} proName={(booking as any).provider_name || 'your pro'} />
+-        )}
+-
+-        {/* Timeline - using the new status tracker with photo gallery + live tracking.
+-            Wrapped in ErrorBoundary so a broken map never crashes the page. */}
+-        <div>
+-          <div className="flex items-center gap-2 mb-3">
+-            <Clock size={14} className="text-[#22C55E]" />
+-            <h4 className="text-sm font-semibold text-slate-900">Service Progress</h4>
+-          </div>
+-          <ErrorBoundary name={`Tracker-${booking.id}`}>
+-            <BookingStatusTracker
+-              status={booking.booking_status}
+-              scheduledDate={booking.scheduled_date}
+-              scheduledTimeWindow={booking.scheduled_time_window}
+-              beforePhotoUrl={booking.before_photo_url}
+-              afterPhotoUrl={booking.after_photo_url}
+-              hasActiveTracking={['on_the_way', 'arrived', 'in_progress'].includes(booking.booking_status)}
+-              bookingId={booking.id}
+-              address={bookingAddress}
+-              proLat={booking.pro_lat}
+-              proLng={booking.pro_lng}
+-              selectedAddons={(booking as any).selected_addons}
+-            />
+-          </ErrorBoundary>
+-        </div>
+-
+-        {/* Action buttons */}
+-        <div className="grid grid-cols-2 gap-2 pt-2">
+-          <button
+-            className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex items-center gap-2 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+-            disabled={isBooked || isCompleted}
+-          >
+-            <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+-              isBooked ? 'bg-slate-200' : 'bg-blue-100'
+-            }`}>
+-              <MessageCircle className={isBooked ? 'text-slate-400' : 'text-blue-500'} size={14} />
+-            </div>
+-            <div>
+-              <h3 className="font-medium text-slate-900 text-xs">Message Pro</h3>
+-              <p className="text-slate-500 text-[10px]">
+-                {isBooked ? 'Available once matched' : 'Send a quick message'}
+-              </p>
+-            </div>
+-          </button>
+-          <button
+-            className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex items-center gap-2 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+-            disabled={!isCompleted}
+-          >
+-            <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+-              isCompleted ? 'bg-green-100' : 'bg-slate-200'
+-            }`}>
+-              <Camera className={isCompleted ? 'text-green-500' : 'text-slate-400'} size={14} />
+-            </div>
+-            <div>
+-              <h3 className="font-medium text-slate-900 text-xs">Service Photos</h3>
+-              <p className="text-slate-500 text-[10px]">
+-                {isCompleted ? 'View before/after' : 'After the visit'}
+-              </p>
+-            </div>
+-          </button>
+-        </div>
+-      </div>
+-    )
+-  }
+-
+-  // Subtitle: when there are multiple bookings, prompt to tap one. When
+-  // there's exactly one, describe that one (using expandedBooking as a
+-  // hint, but not requiring it to be expanded).
+-  const singleBooking = sortedTrackable.length === 1 ? sortedTrackable[0] : null
+-
+   return (
+     <div>
+       <div className="mb-5">
+@@ -554,13 +214,10 @@ export default function TrackService() {
+         <p className="text-sm text-slate-500 mt-1">
+           {sortedTrackable.length > 1
+             ? `You have ${sortedTrackable.length} active services. Tap any to see its timeline.`
+-            : sortedTrackable.length === 1
+-              ? "You've got 1 active service — tap to see its timeline."
+-              : "No active services right now. See your full history in My Services."}
++            : "You've got 1 active service — tap to see its timeline."}
+         </p>
+       </div>
+ 
+-      {/* Section header */}
+       <div className="flex items-center gap-2 mb-3">
+         <Scissors size={18} className="text-[#22C55E]" />
+         <h2 className="text-lg font-semibold text-slate-900">Your Services</h2>
+@@ -569,9 +226,9 @@ export default function TrackService() {
+         </span>
+       </div>
+ 
+-      {/* Expandable booking cards — each one shows the full timeline inline.
+-          Uses the shared CustomerJobCard so the same booking looks the same
+-          here and on any other customer-facing surface. */}
++      {/* Expandable booking cards — each shows the full timeline, photos and
++          approve/dispute controls inline. CustomerJobCard is the single source
++          of truth for how a customer's booking looks. */}
+       <div className="space-y-2">
+         {sortedTrackable.map((booking) => {
+           const isSelected = expandedBooking?.id === booking.id
+@@ -583,7 +240,9 @@ export default function TrackService() {
+                 address={bookingAddress ?? null}
+                 expanded={isSelected}
+                 onToggle={() => setSelectedBookingId(isSelected ? null : booking.id)}
+-                onAction={() => markBookingCompleted(booking.id)}
++                onAction={fetchBookings}
++                onApproved={() => markBookingCompleted(booking.id)}
++                onDisputed={() => markBookingDisputed(booking.id)}
+               />
+             </div>
+           )
+@@ -592,153 +251,3 @@ export default function TrackService() {
+     </div>
+   )
+ }
+-
+-/**
+- * Shown only for completed bookings with an assigned pro.
+- * - If customer hasn't reviewed: prompts them to rate
+- * - If they have: shows their review with an "Edit" link
+- * Also shows the Save to favorites button.
+- */
+-function RateYourProSection({ booking, proName }: { booking: any; proName: string }) {
+-  const [showForm, setShowForm] = useState(false)
+-  const [review, setReview] = useState<Review | null>(null)
+-  const [loaded, setLoaded] = useState(false)
+-
+-  useEffect(() => {
+-    let cancelled = false
+-    getReviewForBooking(booking.id).then((res) => {
+-      if (cancelled) return
+-      setReview(res.data)
+-      setLoaded(true)
+-    })
+-    return () => { cancelled = true }
+-  }, [booking.id])
+-
+-  return (
+-    <div className="border-t border-slate-200 pt-4">
+-      <div className="flex items-center gap-2 mb-3">
+-        <span className="text-lg">⭐</span>
+-        <h4 className="text-sm font-semibold text-slate-900">How was {proName}?</h4>
+-      </div>
+-
+-      {!loaded ? (
+-        <div className="h-12 bg-slate-50 rounded-lg animate-pulse" />
+-      ) : review ? (
+-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+-          <div className="flex items-center gap-2 mb-1">
+-            <div className="flex">
+-              {[1, 2, 3, 4, 5].map((i) => (
+-                <span key={i} className={i <= review.rating ? 'text-amber-400' : 'text-slate-300'}>
+-                  ★
+-                </span>
+-              ))}
+-            </div>
+-            <span className="text-xs text-emerald-700 font-medium">Your review</span>
+-          </div>
+-          {review.comment && (
+-            <p className="text-sm text-slate-700 mt-1 whitespace-pre-line">{review.comment}</p>
+-          )}
+-          <div className="flex items-center gap-3 mt-2 pt-2 border-t border-emerald-200">
+-            <button
+-              onClick={() => setShowForm(true)}
+-              className="text-xs text-emerald-700 font-medium hover:underline"
+-            >
+-              Edit
+-            </button>
+-            <FavoriteButton providerId={booking.provider_id} variant="compact" />
+-          </div>
+-        </div>
+-      ) : (
+-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+-          <p className="text-sm text-amber-900 mb-2">
+-            Reviews help other customers find great pros. Takes 30 seconds.
+-          </p>
+-          <div className="flex flex-wrap items-center gap-2">
+-            <button
+-              onClick={() => setShowForm(true)}
+-              className="inline-flex items-center gap-1.5 bg-[#22C55E] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#16A34A] transition-colors"
+-            >
+-              ★ Rate this pro
+-            </button>
+-            <FavoriteButton providerId={booking.provider_id} variant="compact" />
+-          </div>
+-        </div>
+-      )}
+-
+-      {showForm && (
+-        <ReviewForm
+-          bookingId={booking.id}
+-          proName={proName}
+-          existingReview={review ? { rating: review.rating, comment: review.comment } : null}
+-          onClose={() => setShowForm(false)}
+-          onSubmitted={() => {
+-            // Refetch
+-            getReviewForBooking(booking.id).then((res) => setReview(res.data))
+-          }}
+-        />
+-      )}
+-    </div>
+-  )
+-}
+-
+-/**
+- * Shown when booking status is 'disputed' — customer filed a dispute and is
+- * waiting for the pro to re-fix the issue. No action buttons; just a clear
+- * status explaining what's happening and when the customer can expect an
+- * update. The pro sees the dispute reason on their side and is expected to
+- * either re-do the work (which puts the booking back in pending_review with
+- * a fresh 24h window) or contact the customer to resolve.
+- */
+-function DisputedWaitingSection({ booking, proName }: { booking: any; proName: string }) {
+-  const disputeAge = booking.disputed_at
+-    ? Math.floor((Date.now() - new Date(booking.disputed_at).getTime()) / 3_600_000)
+-    : 0
+-  return (
+-    <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-5">
+-      <div className="flex items-start gap-3 mb-3">
+-        <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0">
+-          <AlertCircle className="text-white" size={20} />
+-        </div>
+-        <div className="flex-1 min-w-0">
+-          <h3 className="font-semibold text-red-900">
+-            You've disputed this job
+-          </h3>
+-          <p className="text-sm text-red-800 mt-1">
+-            We notified {proName} about the issue. They're expected to re-do
+-            the work and send it back for your review.
+-          </p>
+-        </div>
+-      </div>
+-
+-      {booking.dispute_reason && (
+-        <div className="bg-white border border-red-200 rounded-lg p-3 mb-3">
+-          <p className="text-xs font-semibold text-slate-600 mb-1">Your reason:</p>
+-          <p className="text-sm text-slate-800 italic">"{booking.dispute_reason}"</p>
+-        </div>
+-      )}
+-
+-      <div className="flex items-center gap-4 text-xs text-red-700">
+-        <span className="flex items-center gap-1">
+-          <Clock size={12} />
+-          Disputed {disputeAge === 0 ? 'today' : `${disputeAge}h ago`}
+-        </span>
+-        <span className="flex items-center gap-1">
+-          <Shield size={12} />
+-          Payment held in escrow
+-        </span>
+-        {booking.dispute_count > 1 && (
+-          <span className="flex items-center gap-1 text-amber-700">
+-            <AlertCircle size={12} />
+-            Re-opened {booking.dispute_count} time{booking.dispute_count > 1 ? 's' : ''}
+-          </span>
+-        )}
+-      </div>
+-
+-      <p className="text-xs text-red-700 mt-3 italic">
+-        You'll get a fresh 24-hour review window when the pro sends the
+-        corrected version back. If they don't respond within 48 hours, our
+-        support team will step in.
+-      </p>
+-    </div>
+-  )
+-}
+diff --git a/src/pages/pro/ProJobs.tsx b/src/pages/pro/ProJobs.tsx
+index da8d950..631ce55 100644
+--- a/src/pages/pro/ProJobs.tsx
++++ b/src/pages/pro/ProJobs.tsx
+@@ -612,238 +612,11 @@ function AvailableJobCard({
+   )
+ }
+ 
+-function AssignedJobCard({
+-  job, expanded, onToggle, onUpdate, onMarkReadyForReview, actionInProgress, formatDate, formatAddress,
+-}: {
+-  job: ProBookingWithDetails
+-  expanded: boolean
+-  onToggle: () => void
+-  onUpdate: (job: ProBookingWithDetails, status: 'on_the_way' | 'arrived' | 'in_progress' | 'completed') => void
+-  onMarkReadyForReview: (job: ProBookingWithDetails) => void
+-  actionInProgress: boolean
+-  formatDate: (d: string | null) => string
+-  formatAddress: (j: ProBookingWithDetails) => string
+-}) {
+-  const statusInfo = getStatusInfo(job.booking_status)
+-  const nextStep = getNextStep(job.booking_status)
+-  const payout = job.provider_payout_amount ?? job.estimated_price
+-
+-  // Determine if the next step requires a photo. The per-service uploader sets
+-  // before_photo_url/after_photo_url on the booking row when a base-mow photo
+-  // is uploaded, so the legacy columns still work as a signal for the action
+-  // button to stay disabled until the photo is in.
+-  const requiresBeforePhoto = nextStep?.action === 'in_progress' && !job.before_photo_url
+-  const requiresAfterPhoto = nextStep?.action === 'completed' && !job.after_photo_url
+-
+-  return (
+-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+-      <button
+-        onClick={onToggle}
+-        className={`w-full text-left p-4 ${statusInfo.bgClass} hover:brightness-95 transition-all`}
+-      >
+-        <div className="flex items-start justify-between mb-2">
+-          <div>
+-            <div className="flex items-center gap-2 mb-1">
+-              <h3 className="font-semibold text-slate-900">{job.customer_name || 'Customer'}</h3>
+-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusInfo.badgeClass}`}>
+-                {statusInfo.label}
+-              </span>
+-              <span className="text-xs px-1.5 py-0.5 bg-white/60 text-slate-700 rounded font-medium">
+-                {yardSizeLabel(job.yard_size_category)}
+-              </span>
+-            </div>
+-            <p className="text-sm text-slate-600">{formatAddress(job)}</p>
+-          </div>
+-          <div className="text-right flex items-center gap-2 flex-shrink-0">
+-            <div>
+-              <p className="text-xs text-slate-500">You'll earn</p>
+-              <p className="text-xl font-bold text-[#22C55E]">${payout.toFixed(2)}</p>
+-            </div>
+-            {expanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+-          </div>
+-        </div>
+-        <div className="flex items-center gap-4 text-sm text-slate-600 mt-2 flex-wrap">
+-          <span className="flex items-center gap-1">
+-            <Clock size={14} /> {formatDate(job.scheduled_date)} · {job.scheduled_time_window || 'Time TBD'}
+-          </span>
+-          <span className="flex items-center gap-1">
+-            <User size={14} /> {serviceTypeLabel(job.service_type)}
+-          </span>
+-        </div>
+-      </button>
+-
+-      <div className="p-4">
+-        {expanded && (
+-          <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
+-            {/* Mini progress stepper — shows the pro where the job is in the flow */}
+-            <ProStatusStepper status={job.booking_status} />
+-            {job.notes && (
+-              <div className="flex items-start gap-2">
+-                <AlertCircle size={16} className="text-amber-500 mt-0.5 flex-shrink-0" />
+-                <div>
+-                  <p className="text-xs text-slate-500">Special Instructions</p>
+-                  <p className="text-sm text-slate-700 whitespace-pre-line">{job.notes}</p>
+-                </div>
+-              </div>
+-            )}
+-            {job.customer_phone && (
+-              <div className="flex items-center gap-2">
+-                <Phone size={16} className="text-slate-400" />
+-                <a href={`tel:${job.customer_phone}`} className="text-sm text-blue-600 hover:underline">
+-                  {job.customer_phone}
+-                </a>
+-              </div>
+-            )}
+-            <a
+-              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(job))}`}
+-              target="_blank"
+-              rel="noopener noreferrer"
+-              className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1"
+-            >
+-              <ExternalLink size={14} /> Open in Google Maps
+-            </a>
+-
+-            {/* Per-service photo uploader: only show once pro is on-site or further.
+-                Earlier states (booked / on_the_way) shouldn't see the uploader —
+-                no point taking photos before you've arrived. */}
+-            {job.booking_status !== 'completed' &&
+-              ['arrived', 'in_progress', 'mowing', 'pending_review'].includes(job.booking_status) ? (
+-              <div>
+-                <div className="flex items-center justify-between mb-2">
+-                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+-                    Job photos
+-                  </div>
+-                  <span className="text-xs text-slate-400">
+-                    1 before + 1 after per service
+-                  </span>
+-                </div>
+-                <PerServicePhotoUploader
+-                  bookingId={job.id}
+-                  selectedAddons={hydrateAddons((job as any).selected_addons)}
+-                  onPhotoUploaded={() => fetchJobs()}
+-                />
+-              </div>
+-            ) : (
+-              <div>
+-                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+-                  Photos you uploaded
+-                </div>
+-                <JobPhotoGallery
+-                  bookingId={job.id}
+-                  allowUpload={false}
+-                  compact
+-                />
+-              </div>
+-            )}
+-          </div>
+-        )}
+-
+-        {/* Action button — only show when no photo is required, OR when photo is uploaded */}
+-        {nextStep && !requiresBeforePhoto && !requiresAfterPhoto && (
+-          <button
+-            onClick={() => onUpdate(job, nextStep.action)}
+-            disabled={actionInProgress}
+-            className="w-full bg-[#22C55E] text-white py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+-          >
+-            {actionInProgress ? (
+-              <Loader2 size={18} className="animate-spin" />
+-            ) : (
+-              <CheckCircle size={18} />
+-            )}
+-            {nextStep.label}
+-          </button>
+-        )}
+-
+-        {/* If photo is required, show a hint pointing to the per-service slots above */}
+-        {(requiresBeforePhoto || requiresAfterPhoto) && (
+-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-center">
+-            <p className="text-sm text-amber-900">
+-              {requiresBeforePhoto
+-                ? '📸 Add a Before photo for Lawn Mowing in the box above to start work'
+-                : '📸 Add an After photo for Lawn Mowing in the box above to mark complete'}
+-            </p>
+-          </div>
+-        )}
++// NOTE: the old in-file `AssignedJobCard` was removed on 2026-08-18. It had been
++// dead since assigned jobs moved to the shared <ProJobCard> component, and it
++// still referenced a `fetchJobs` that does not exist in its scope — so anyone
++// re-enabling it would have hit a ReferenceError on photo upload.
+ 
+-        {/* Disputed banner — shown when the customer disputed the work. */}
+-        {job.booking_status === 'disputed' && (
+-          <div className="border-t border-slate-200 pt-3 mt-3">
+-            <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4">
+-              <div className="flex items-start gap-3 mb-3">
+-                <div className="w-9 h-9 bg-red-500 rounded-full flex items-center justify-center flex-shrink-0">
+-                  <AlertCircle className="text-white" size={18} />
+-                </div>
+-                <div className="flex-1 min-w-0">
+-                  <h4 className="font-semibold text-red-900">
+-                    Customer disputed this job
+-                  </h4>
+-                  <p className="text-xs text-red-700 mt-0.5">
+-                    ${(job.provider_payout_amount || 0).toFixed(2)} is being held in escrow.
+-                    Upload a corrected After photo for the affected service, then send it back for review.
+-                  </p>
+-                </div>
+-              </div>
+-              {(job as any).dispute_reason && (
+-                <div className="bg-white border border-red-200 rounded-lg p-3 mb-3">
+-                  <p className="text-xs font-semibold text-slate-700 mb-1">Their reason:</p>
+-                  <p className="text-sm text-slate-800 italic">"{(job as any).dispute_reason}"</p>
+-                </div>
+-              )}
+-            </div>
+-          </div>
+-        )}
+-
+-        {/* Mark Ready for Review — shown when in_progress OR disputed so the pro
+-            can attempt it. markReadyForReview validates photos server-side and
+-            returns the specific list of missing photos if any. */}
+-        {(job.booking_status === 'in_progress' || job.booking_status === 'disputed') && (
+-          <div className="border-t border-slate-200 pt-3 mt-3">
+-            <p className="text-xs text-slate-500 mb-2">
+-              {job.booking_status === 'disputed'
+-                ? 'When you\u2019ve re-fixed the issue, send it back to the customer for a fresh 24-hour review.'
+-                : 'When every service is done, mark the job ready for the customer\u2019s 24-hour review.'}
+-            </p>
+-            <button
+-              onClick={() => onMarkReadyForReview(job)}
+-              disabled={actionInProgress}
+-              className={`w-full text-white py-3 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50 shadow-md ${
+-                job.booking_status === 'disputed'
+-                  ? 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700'
+-                  : 'bg-gradient-to-r from-emerald-500 to-[#22C55E] hover:from-emerald-600 hover:to-[#16A34A]'
+-              }`}
+-            >
+-              {actionInProgress ? (
+-                <Loader2 size={18} className="animate-spin" />
+-              ) : (
+-                <Shield size={18} />
+-              )}
+-              {job.booking_status === 'disputed'
+-                ? 'Send Fixed Version for Re-Review'
+-                : 'Mark Ready for Customer Review'}
+-            </button>
+-          </div>
+-        )}
+-
+-        {/* Pending review banner — when in the 24h window */}
+-        {job.booking_status === 'pending_review' && (
+-          <div className="border-t border-slate-200 pt-3 mt-3">
+-            <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-3 flex items-center gap-3">
+-              <div className="w-9 h-9 bg-amber-500 rounded-full flex items-center justify-center flex-shrink-0">
+-                <Shield className="text-white" size={18} />
+-              </div>
+-              <div className="flex-1 min-w-0">
+-                <p className="font-semibold text-amber-900 text-sm">Awaiting customer review</p>
+-                <p className="text-xs text-amber-800 mt-0.5">
+-                  Customer has 24h to approve. Payment auto-releases if they don't act.
+-                </p>
+-              </div>
+-            </div>
+-          </div>
+-        )}
+-      </div>
+-    </div>
+-  )
+-}
+ 
+ function getStatusInfo(status: string): { label: string; bgClass: string; badgeClass: string } {
+   switch (status) {
+diff --git a/supabase/DIAGNOSE.sql b/supabase/DIAGNOSE.sql
+new file mode 100644
+index 0000000..f8a5762
+--- /dev/null
++++ b/supabase/DIAGNOSE.sql
+@@ -0,0 +1,91 @@
++-- ============================================================================
++-- MowList — read-only database diagnostic
++--
++-- Paste this whole file into the Supabase SQL Editor and hit Run. It changes
++-- NOTHING. Each block returns one small table; send the results back and we can
++-- stop guessing about what's actually in the live database.
++-- ============================================================================
++
++
++-- 1. Who is allowed to UPDATE bookings?
++--    EXPECTED after migration 27: rows for providers, admins AND customers.
++--    If there is no customer row, "Approve & Release Payment" is a silent no-op.
++SELECT
++  policyname,
++  cmd,
++  qual        AS using_expression,
++  with_check  AS with_check_expression
++FROM pg_policies
++WHERE schemaname = 'public' AND tablename = 'bookings'
++ORDER BY cmd, policyname;
++
++
++-- 2. Does the booking_status CHECK allow every status the app writes?
++--    Must include: requested, booked, provider_assigned, on_the_way, arrived,
++--    in_progress, pending_review, completed, cancelled, disputed, refunded.
++--    Also check payment_status allows: pending, authorized, captured, failed,
++--    refunded, partially_refunded.
++SELECT
++  con.conname AS constraint_name,
++  pg_get_constraintdef(con.oid) AS definition
++FROM pg_constraint con
++JOIN pg_class rel ON rel.oid = con.conrelid
++JOIN pg_namespace ns ON ns.oid = rel.relnamespace
++WHERE ns.nspname = 'public'
++  AND rel.relname IN ('bookings', 'payments')
++  AND con.contype = 'c'
++ORDER BY rel.relname, con.conname;
++
++
++-- 3. Do the columns the payment code depends on actually exist?
++--    Anything showing 'MISSING' will break capture or payouts.
++SELECT c.needed AS column_name,
++       CASE WHEN col.column_name IS NULL THEN 'MISSING' ELSE 'ok' END AS status
++FROM (VALUES
++  ('payment_intent_id'), ('payment_captured_at'), ('stripe_transfer_id'),
++  ('provider_paid_at'), ('provider_payout_amount'), ('platform_fee'),
++  ('ready_for_review_at'), ('auto_capture_at'), ('reviewed_at'),
++  ('customer_approved_at'), ('completed_at'), ('dispute_reason'),
++  ('disputed_at'), ('selected_addons')
++) AS c(needed)
++LEFT JOIN information_schema.columns col
++  ON col.table_schema = 'public'
++ AND col.table_name = 'bookings'
++ AND col.column_name = c.needed
++ORDER BY status DESC, column_name;
++
++
++-- 4. Bookings stuck awaiting review, and whether they can actually be captured.
++--    A NULL payment_intent_id means the money can never be collected.
++SELECT
++  id,
++  booking_status,
++  payment_status,
++  estimated_price,
++  provider_id IS NOT NULL AS has_pro,
++  payment_intent_id IS NOT NULL AS can_capture,
++  ready_for_review_at,
++  auto_capture_at
++FROM public.bookings
++WHERE booking_status IN ('pending_review', 'disputed')
++ORDER BY ready_for_review_at DESC NULLS LAST
++LIMIT 25;
++
++
++-- 5. Is the hourly auto-capture cron job actually scheduled?
++--    Empty result = the 24h auto-release never runs.
++SELECT jobid, schedule, jobname, active
++FROM cron.job
++ORDER BY jobid;
++
++
++-- 6. Pros and their Stripe Connect state. `payouts_enabled = false` means we
++--    cannot transfer money to them, no matter how many jobs they complete.
++SELECT
++  display_name,
++  stripe_connect_account_id IS NOT NULL AS has_connect_account,
++  stripe_connect_charges_enabled,
++  stripe_connect_payouts_enabled,
++  stripe_connect_onboarding_complete
++FROM public.provider_profiles
++ORDER BY display_name;
+diff --git a/supabase/functions/capture-payment/index.ts b/supabase/functions/capture-payment/index.ts
+index 430bc74..b3b77eb 100644
+--- a/supabase/functions/capture-payment/index.ts
++++ b/supabase/functions/capture-payment/index.ts
+@@ -10,6 +10,9 @@
+ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+ 
++// Keep in sync with create-payment-intent.
++const PLATFORM_FEE_PERCENT = 15 // MowList takes 15%
++
+ const STRIPE_SECRET_KEY = Deno.env.get('STRIPE_SECRET_KEY')
+ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+@@ -41,10 +44,16 @@ serve(async (req) => {
+       throw new Error('booking_id is required')
+     }
+ 
+-    // Fetch the booking to find the payment intent
++    // Fetch the booking to find the payment intent + who to pay
+     const { data: booking, error: bErr } = await supabaseAdmin
+       .from('bookings')
+-      .select('id, payment_intent_id, payment_status, booking_status, customer_id')
++      .select(`
++        id, payment_intent_id, payment_status, booking_status, customer_id,
++        provider_id, estimated_price, provider_payout_amount,
++        provider_profiles!bookings_provider_id_fkey(
++          stripe_connect_account_id, stripe_connect_payouts_enabled
++        )
++      `)
+       .eq('id', booking_id)
+       .single()
+ 
+@@ -59,13 +68,34 @@ serve(async (req) => {
+       )
+     }
+ 
+-    if (!booking.payment_intent_id) {
++    // Fall back to the payments table for bookings paid before
++    // create-payment-intent started writing bookings.payment_intent_id.
++    let paymentIntentId: string | null = booking.payment_intent_id
++    if (!paymentIntentId) {
++      const { data: payment } = await supabaseAdmin
++        .from('payments')
++        .select('stripe_payment_intent_id')
++        .eq('booking_id', booking_id)
++        .not('stripe_payment_intent_id', 'is', null)
++        .order('created_at', { ascending: false })
++        .limit(1)
++        .maybeSingle()
++      paymentIntentId = payment?.stripe_payment_intent_id ?? null
++      if (paymentIntentId) {
++        await supabaseAdmin
++          .from('bookings')
++          .update({ payment_intent_id: paymentIntentId })
++          .eq('id', booking_id)
++      }
++    }
++
++    if (!paymentIntentId) {
+       throw new Error('No payment intent on this booking')
+     }
+ 
+     // Capture the payment in Stripe
+     const captureResp = await fetch(
+-      `https://api.stripe.com/v1/payment_intents/${booking.payment_intent_id}/capture`,
++      `https://api.stripe.com/v1/payment_intents/${paymentIntentId}/capture`,
+       {
+         method: 'POST',
+         headers: {
+@@ -82,11 +112,76 @@ serve(async (req) => {
+       throw new Error(captureData.error?.message || 'Failed to capture payment')
+     }
+ 
++    // ---------------------------------------------------------------------
++    // Pay the pro (separate charges and transfers)
++    //
++    // The charge lands on the MowList platform account because the pro isn't
++    // known when the customer pays. Now that the job is approved and we know
++    // who did it, move their cut to their connected account. `source_transaction`
++    // ties the transfer to this specific charge so Stripe waits for the funds
++    // to become available instead of drawing on the platform balance.
++    //
++    // This is best-effort: a failed transfer must never roll back a successful
++    // capture. It's logged and left for the admin payouts screen to retry.
++    // ---------------------------------------------------------------------
++    let transferId: string | null = null
++    let transferError: string | null = null
++    const proProfile: any = (booking as any).provider_profiles
++    const chargeId: string | null = captureData.latest_charge || null
++
++    if (proProfile?.stripe_connect_account_id && proProfile?.stripe_connect_payouts_enabled && chargeId) {
++      const capturedCents = captureData.amount_received ?? captureData.amount ?? 0
++      // Prefer the payout amount already computed on the booking; otherwise
++      // fall back to the captured amount minus the platform fee.
++      const payoutCents = booking.provider_payout_amount
++        ? Math.round(Number(booking.provider_payout_amount) * 100)
++        : Math.round(capturedCents * (100 - PLATFORM_FEE_PERCENT) / 100)
++
++      if (payoutCents > 0 && payoutCents <= capturedCents) {
++        const transferParams = new URLSearchParams()
++        transferParams.append('amount', String(payoutCents))
++        transferParams.append('currency', 'usd')
++        transferParams.append('destination', proProfile.stripe_connect_account_id)
++        transferParams.append('source_transaction', chargeId)
++        transferParams.append('transfer_group', `booking_${booking_id}`)
++        transferParams.append('metadata[booking_id]', booking_id)
++
++        const transferResp = await fetch('https://api.stripe.com/v1/transfers', {
++          method: 'POST',
++          headers: {
++            'Authorization': `Bearer ${STRIPE_SECRET_KEY}`,
++            'Content-Type': 'application/x-www-form-urlencoded',
++            // Never pay a pro twice for the same booking, even if this function
++            // is retried by pg_cron or double-clicked by the customer.
++            'Idempotency-Key': `mowlist_payout_${booking_id}`,
++          },
++          body: transferParams.toString(),
++        })
++        const transferData = await transferResp.json()
++        if (transferResp.ok) {
++          transferId = transferData.id
++        } else {
++          transferError = transferData.error?.message || 'Transfer failed'
++          console.error('Stripe transfer error:', JSON.stringify(transferData))
++        }
++      } else {
++        transferError = `Refusing to transfer ${payoutCents} cents against a ${capturedCents} cent capture`
++        console.error(transferError)
++      }
++    } else if (booking.provider_id) {
++      transferError = 'Pro has no Stripe Connect account with payouts enabled'
++      console.warn(transferError, { booking_id, provider_id: booking.provider_id })
++    }
++
+     // Update the booking
+     const updates: any = {
+       payment_status: 'captured',
+       payment_captured_at: new Date().toISOString(),
+     }
++    if (transferId) {
++      updates.stripe_transfer_id = transferId
++      updates.provider_paid_at = new Date().toISOString()
++    }
+ 
+     // If reason is 'auto_capture' (called by pg_cron) and booking is still pending_review,
+     // mark it completed. If customer approved manually, this is already done.
+@@ -103,9 +198,11 @@ serve(async (req) => {
+     return new Response(
+       JSON.stringify({
+         ok: true,
+-        payment_intent_id: booking.payment_intent_id,
++        payment_intent_id: paymentIntentId,
+         amount_captured: captureData.amount_received,
+         reason: reason || 'manual',
++        transfer_id: transferId,
++        transfer_error: transferError,
+       }),
+       {
+         status: 200,
+diff --git a/supabase/functions/create-payment-intent/index.ts b/supabase/functions/create-payment-intent/index.ts
+index 6422756..25f2906 100644
+--- a/supabase/functions/create-payment-intent/index.ts
++++ b/supabase/functions/create-payment-intent/index.ts
+@@ -130,9 +130,11 @@ serve(async (req) => {
+ 
+     // Check if there's a pro with Stripe Connect set up for this booking
+     const proConnectAccountId = await getProConnectAccount(booking_id)
+-    const platformFeeCents = proConnectAccountId
+-      ? Math.round(amountInCents * PLATFORM_FEE_PERCENT / 100)
+-      : 0
++    // MowList's cut is the same whether or not a pro is attached yet — the pro
++    // is usually assigned AFTER payment, and the payout is transferred at
++    // capture time. Computing the fee only when a pro already existed meant
++    // provider_payout_amount was recorded as the full ticket price.
++    const platformFeeCents = Math.round(amountInCents * PLATFORM_FEE_PERCENT / 100)
+ 
+     // Build the PaymentIntent
+     const params = new URLSearchParams()
+@@ -156,11 +158,18 @@ serve(async (req) => {
+       params.append('setup_future_usage', 'off_session')
+     }
+ 
+-    // If pro has Stripe Connect, transfer funds (minus platform fee) to them
+-    if (proConnectAccountId && platformFeeCents > 0) {
+-      params.append('application_fee_amount', platformFeeCents.toString())
+-      params.append('transfer_data[destination]', proConnectAccountId)
+-    }
++    // NOTE ON PAYOUTS — do NOT add transfer_data / application_fee_amount here.
++    //
++    // `transfer_data[destination]` (a "destination charge") has to name the
++    // connected account at PaymentIntent creation time. On MowList the customer
++    // pays BEFORE a pro accepts the job, so at this moment there usually is no
++    // pro yet — which is exactly why payouts were landing in the platform
++    // account instead of the pro's.
++    //
++    // MowList uses "separate charges and transfers" instead: the charge lands
++    // on the platform account, and capture-payment creates a Transfer to the
++    // pro's connected account once the job is approved and the pro is known.
++    // `platformFeeCents` below is kept for reporting/metadata only.
+ 
+     params.append('metadata[booking_id]', booking_id)
+     params.append('metadata[mowlist_user_id]', user_id)
+@@ -186,6 +195,25 @@ serve(async (req) => {
+       throw new Error(data.error?.message || 'Stripe API error')
+     }
+ 
++    // Record the PaymentIntent on the booking. capture-payment reads
++    // `bookings.payment_intent_id` to know what to capture — nothing was ever
++    // writing it, so every capture failed with "No payment intent on this
++    // booking" and authorized funds silently expired instead of being charged.
++    const { error: linkErr } = await supabaseAdmin
++      .from('bookings')
++      .update({
++        payment_intent_id: data.id,
++        platform_fee: platformFeeCents / 100,
++        provider_payout_amount: (amountInCents - platformFeeCents) / 100,
++      })
++      .eq('id', booking_id)
++
++    if (linkErr) {
++      // Don't fail the payment over this, but make it loud — an unlinked
++      // PaymentIntent means the money can never be captured.
++      console.error('CRITICAL: could not link payment_intent to booking', booking_id, linkErr)
++    }
++
+     return new Response(
+       JSON.stringify({
+         clientSecret: data.client_secret,
+diff --git a/supabase/functions/stripe-webhook/index.ts b/supabase/functions/stripe-webhook/index.ts
+index 590b947..0863538 100644
+--- a/supabase/functions/stripe-webhook/index.ts
++++ b/supabase/functions/stripe-webhook/index.ts
+@@ -4,6 +4,9 @@
+ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+ 
++// Keep in sync with create-payment-intent / capture-payment.
++const PLATFORM_FEE_PERCENT = 15 // MowList takes 15%
++
+ const STRIPE_SECRET_KEY = Deno.env.get('STRIPE_SECRET_KEY')
+ const STRIPE_WEBHOOK_SECRET = Deno.env.get('STRIPE_WEBHOOK_SECRET')
+ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+@@ -149,6 +152,54 @@ serve(async (req) => {
+   try {
+     // Handle specific event types
+     switch (event.type) {
++      // MowList authorizes the card up front and captures after the customer
++      // approves the work. With capture_method: 'manual', Stripe fires
++      // `amount_capturable_updated` at authorization time and only fires
++      // `payment_intent.succeeded` later, at capture. Both need handling:
++      // authorization is when the booking becomes paid-for and trackable.
++      case 'payment_intent.amount_capturable_updated': {
++        const pi = event.data.object
++        const bookingId = pi.metadata?.booking_id
++        const userId = pi.metadata?.mowlist_user_id
++
++        const totalAmount = pi.amount / 100
++        const platformFeeCents = Math.round(pi.amount * PLATFORM_FEE_PERCENT / 100)
++        const platformFee = platformFeeCents / 100
++        const proPayout = (pi.amount - platformFeeCents) / 100
++
++        await supabaseAdmin.from('payments').upsert(
++          {
++            booking_id: bookingId,
++            customer_id: userId,
++            stripe_payment_intent_id: pi.id,
++            stripe_charge_id: pi.latest_charge,
++            stripe_payment_method_id: pi.payment_method,
++            amount: totalAmount,
++            platform_fee: platformFee,
++            pro_payout_amount: proPayout,
++            currency: pi.currency,
++            status: 'authorized',
++            payment_method_type: pi.payment_method_types?.[0] || null,
++            metadata_json: pi.metadata || {},
++            updated_at: new Date().toISOString(),
++          },
++          { onConflict: 'stripe_payment_intent_id' }
++        )
++
++        if (bookingId) {
++          await supabaseAdmin
++            .from('bookings')
++            .update({
++              payment_intent_id: pi.id,
++              payment_status: 'authorized',
++              platform_fee: platformFee,
++              provider_payout_amount: proPayout,
++            })
++            .eq('id', bookingId)
++        }
++        break
++      }
++
+       case 'payment_intent.succeeded': {
+         const pi = event.data.object
+         const bookingId = pi.metadata?.booking_id
+@@ -177,8 +228,12 @@ serve(async (req) => {
+         // (application_fee_amount + transfer_data[destination]). For direct
+         // MowList payments (no connected pro), the entire amount is the
+         // platform's revenue — pro_payout_amount stays 0.
++        // MowList uses separate charges and transfers, so there is no
++        // `application_fee_amount` on the PaymentIntent — it used to be read
++        // straight off the PI, which meant platform_fee was always $0 and the
++        // pro's payout was recorded as the full ticket price.
+         const totalAmount = pi.amount / 100
+-        const platformFeeCents = pi.application_fee_amount || 0
++        const platformFeeCents = Math.round(pi.amount * PLATFORM_FEE_PERCENT / 100)
+         const platformFee = platformFeeCents / 100
+         const proPayout = (pi.amount - platformFeeCents) / 100
+ 
+@@ -194,7 +249,10 @@ serve(async (req) => {
+             platform_fee: platformFee,
+             pro_payout_amount: proPayout,
+             currency: pi.currency,
+-            status: 'succeeded',
++            // 'succeeded' is not one of the allowed payment statuses
++            // (pending / authorized / captured / failed / refunded /
++            // partially_refunded) — writing it silently failed the insert.
++            status: 'captured',
+             payment_method_type: pi.payment_method_types?.[0] || null,
+             receipt_url: receiptUrl,
+             metadata_json: pi.metadata || {},
+@@ -208,16 +266,18 @@ serve(async (req) => {
+         // from bookings.provider_payout_amount). Only flip booking_status if
+         // it's in 'provider_assigned' so we don't clobber in-progress jobs.
+         if (bookingId) {
++          // 'paid' is not an allowed payment_status value — this whole update
++          // was being rejected by the CHECK constraint, so captured payments
++          // never showed up on the booking.
+           await supabaseAdmin
+             .from('bookings')
+             .update({
+-              payment_status: 'paid',
+-              booking_status: 'booked',
++              payment_status: 'captured',
++              payment_captured_at: new Date().toISOString(),
+               platform_fee: platformFee,
+               provider_payout_amount: proPayout,
+             })
+             .eq('id', bookingId)
+-            .eq('booking_status', 'provider_assigned')
+         }
+ 
+         // Belt-and-suspenders: explicitly attach the payment method to the customer
+diff --git a/supabase/migrations/2026-08-18_customer_booking_update_rls.sql b/supabase/migrations/2026-08-18_customer_booking_update_rls.sql
+new file mode 100644
+index 0000000..6ae4362
+--- /dev/null
++++ b/supabase/migrations/2026-08-18_customer_booking_update_rls.sql
+@@ -0,0 +1,107 @@
++-- ============================================================================
++-- MIGRATION 27 — Customers can update their own bookings (approve / dispute)
++-- ============================================================================
++--
++-- ROOT CAUSE OF THE "APPROVE & RELEASE PAYMENT DOES NOTHING" BUG.
++--
++-- The `bookings` table has RLS enabled with these policies:
++--   * SELECT — customers, providers, admins
++--   * INSERT — customers
++--   * UPDATE — providers, admins
++--
++-- There has never been an UPDATE policy for customers. So when the customer
++-- clicks "Approve & Release Payment", the UPDATE matches ZERO rows. Postgres
++-- does not treat that as an error, and PostgREST returns 204 with no error —
++-- so the client believed the write succeeded, flipped the card optimistically,
++-- and then the next fetch showed `pending_review` again. That looked exactly
++-- like a stale cache, which is why it was so hard to pin down.
++--
++-- This migration:
++--   1. Adds a customer UPDATE policy on bookings.
++--   2. Adds a BEFORE UPDATE trigger so the new policy can't be abused — a
++--      customer can approve, dispute, or cancel, and cannot touch price,
++--      payment status, or who the job is assigned to.
++--
++-- Idempotent: safe to run more than once.
++-- ============================================================================
++
++
++-- ---------------------------------------------------------------------------
++-- 1. Guardrail trigger — runs BEFORE the policy lets an update through
++-- ---------------------------------------------------------------------------
++CREATE OR REPLACE FUNCTION public.enforce_customer_booking_update()
++RETURNS TRIGGER
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = public
++AS $$
++DECLARE
++  is_admin BOOLEAN;
++BEGIN
++  -- Service role (edge functions, pg_cron, the Stripe webhook) has no
++  -- auth.uid(). Those callers are trusted — let them through untouched.
++  IF auth.uid() IS NULL THEN
++    RETURN NEW;
++  END IF;
++
++  -- Only police updates made BY the booking's own customer. Pro and admin
++  -- updates are governed by their own policies.
++  IF auth.uid() IS DISTINCT FROM OLD.customer_id THEN
++    RETURN NEW;
++  END IF;
++
++  SELECT EXISTS (
++    SELECT 1 FROM public.users u WHERE u.id = auth.uid() AND u.role = 'admin'
++  ) INTO is_admin;
++
++  IF is_admin THEN
++    RETURN NEW;
++  END IF;
++
++  -- A customer may NEVER change money or assignment.
++  IF NEW.estimated_price        IS DISTINCT FROM OLD.estimated_price
++     OR NEW.final_price            IS DISTINCT FROM OLD.final_price
++     OR NEW.platform_fee           IS DISTINCT FROM OLD.platform_fee
++     OR NEW.provider_payout_amount IS DISTINCT FROM OLD.provider_payout_amount
++     OR NEW.payment_status         IS DISTINCT FROM OLD.payment_status
++     OR NEW.customer_id            IS DISTINCT FROM OLD.customer_id
++     OR NEW.provider_id            IS DISTINCT FROM OLD.provider_id
++  THEN
++    RAISE EXCEPTION
++      'Customers cannot modify pricing, payment status, or job assignment';
++  END IF;
++
++  -- A customer may only make these status transitions.
++  IF NEW.booking_status IS DISTINCT FROM OLD.booking_status THEN
++    IF NOT (
++         (OLD.booking_status = 'pending_review'
++            AND NEW.booking_status IN ('completed', 'disputed'))
++      OR (OLD.booking_status IN ('requested', 'booked', 'provider_assigned')
++            AND NEW.booking_status = 'cancelled')
++    ) THEN
++      RAISE EXCEPTION
++        'Customers cannot change booking status from % to %',
++        OLD.booking_status, NEW.booking_status;
++    END IF;
++  END IF;
++
++  RETURN NEW;
++END;
++$$;
++
++
++DROP TRIGGER IF EXISTS trg_enforce_customer_booking_update ON public.bookings;
++CREATE TRIGGER trg_enforce_customer_booking_update
++  BEFORE UPDATE ON public.bookings
++  FOR EACH ROW
++  EXECUTE FUNCTION public.enforce_customer_booking_update();
++
++
++-- ---------------------------------------------------------------------------
++-- 2. The missing policy
++-- ---------------------------------------------------------------------------
++DROP POLICY IF EXISTS "Customers can update own bookings" ON public.bookings;
++CREATE POLICY "Customers can update own bookings" ON public.bookings
++  FOR UPDATE
++  USING (customer_id = auth.uid())
++  WITH CHECK (customer_id = auth.uid());
+diff --git a/supabase/migrations/2026-08-18_payment_plumbing.sql b/supabase/migrations/2026-08-18_payment_plumbing.sql
+new file mode 100644
+index 0000000..a92e77e
+--- /dev/null
++++ b/supabase/migrations/2026-08-18_payment_plumbing.sql
+@@ -0,0 +1,63 @@
++-- ============================================================================
++-- MIGRATION 28 — Payment plumbing: link PaymentIntents, record pro payouts
++-- ============================================================================
++--
++-- Two problems this fixes:
++--
++-- 1. `capture-payment` reads `bookings.payment_intent_id` to know which
++--    PaymentIntent to charge — but nothing ever wrote that column, and on some
++--    databases the column doesn't exist at all. Every capture failed with
++--    "No payment intent on this booking", so authorized funds were never
++--    collected and simply expired after 7 days.
++--
++-- 2. MowList now pays pros with separate transfers (created at capture time)
++--    rather than destination charges, so we need somewhere to record the
++--    transfer.
++--
++-- Idempotent: safe to run more than once.
++-- ============================================================================
++
++ALTER TABLE public.bookings
++  ADD COLUMN IF NOT EXISTS payment_intent_id     TEXT,
++  ADD COLUMN IF NOT EXISTS payment_captured_at   TIMESTAMPTZ,
++  ADD COLUMN IF NOT EXISTS stripe_transfer_id    TEXT,
++  ADD COLUMN IF NOT EXISTS provider_paid_at      TIMESTAMPTZ;
++
++CREATE INDEX IF NOT EXISTS idx_bookings_payment_intent
++  ON public.bookings(payment_intent_id);
++
++
++-- ---------------------------------------------------------------------------
++-- Backfill payment_intent_id from the payments table for anything already paid
++-- ---------------------------------------------------------------------------
++UPDATE public.bookings b
++SET payment_intent_id = p.stripe_payment_intent_id
++FROM public.payments p
++WHERE p.booking_id = b.id
++  AND p.stripe_payment_intent_id IS NOT NULL
++  AND b.payment_intent_id IS NULL;
++
++
++-- ---------------------------------------------------------------------------
++-- Make sure the payments.status CHECK allows the values the webhook writes.
++-- The original schema allowed pending/authorized/captured/failed/refunded/
++-- partially_refunded; a later rebuild of the table dropped the constraint.
++-- Either way, end up with one known-good constraint.
++-- ---------------------------------------------------------------------------
++-- Any legacy rows written with the invalid 'succeeded' status become 'captured'
++-- FIRST, so the constraint below can be applied cleanly.
++UPDATE public.payments SET status = 'captured' WHERE status = 'succeeded';
++
++DO $$
++BEGIN
++  ALTER TABLE public.payments DROP CONSTRAINT IF EXISTS payments_status_check;
++  ALTER TABLE public.payments
++    ADD CONSTRAINT payments_status_check
++    CHECK (status IN (
++      'pending', 'authorized', 'captured', 'failed', 'refunded', 'partially_refunded'
++    ));
++EXCEPTION WHEN others THEN
++  -- If existing rows violate the constraint, don't block the migration —
++  -- report it instead. Run the SELECT below to see the offenders.
++  RAISE NOTICE 'Could not re-apply payments_status_check: %', SQLERRM;
++END $$;
+-- 
+2.43.0
+

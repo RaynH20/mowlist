@@ -210,7 +210,17 @@ function CheckoutForm() {
         paymentIntent = pi
       }
 
-      if (paymentIntent?.status === 'succeeded') {
+      // MowList authorizes the card now and captures later (pay-on-completion),
+      // so a successful confirmation lands on `requires_capture`, NOT
+      // `succeeded`. Treating only `succeeded` as success made every real
+      // booking show "Payment status: requires_capture" to the customer even
+      // though their card had been authorized correctly.
+      const authorized =
+        paymentIntent?.status === 'requires_capture' ||
+        paymentIntent?.status === 'succeeded' ||
+        paymentIntent?.status === 'processing'
+
+      if (authorized) {
         // If this is a brand-new booking (legacy flow with passedFormData),
         // create the address and booking now that payment succeeded.
         // If this is an existing booking (the pro already accepted), the
@@ -238,9 +248,12 @@ function CheckoutForm() {
               geocode_source: geocoded?.source ?? null,
             } as any)
             if (address) {
+              // yard_size_category has a CHECK constraint that only allows
+              // small / standard / large / custom_quote — 'medium' is not a
+              // valid value and silently failed the whole insert.
               const sizeMap: Record<string, string> = {
                 small: 'small',
-                medium: 'medium',
+                medium: 'standard',
                 large: 'large',
                 standard: 'standard',
                 'custom-quote': 'custom_quote',
@@ -254,14 +267,18 @@ function CheckoutForm() {
               await createBooking({
                 customer_id: user.id,
                 address_id: address.id,
-                yard_size_category: (sizeMap[lawnSize] || 'medium') as any,
+                yard_size_category: (sizeMap[lawnSize] || 'standard') as any,
                 service_type: 'lawn_mowing',
                 service_frequency: (freqMap[passedFormData.frequency] || 'one_time') as any,
                 scheduled_date: passedFormData.date || null,
                 scheduled_time_window: passedFormData.time || null,
                 estimated_price: total,
                 booking_status: 'booked',
-                payment_status: 'paid',
+                // 'paid' is not an allowed payment_status (the CHECK allows
+                // pending / authorized / captured / failed / refunded /
+                // partially_refunded). The card is authorized at this point;
+                // capture happens after the customer approves the work.
+                payment_status: 'authorized',
                 notes: passedFormData.specialInstructions || null,
               })
             }

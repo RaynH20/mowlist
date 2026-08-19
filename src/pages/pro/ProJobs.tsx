@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   MapPin, Clock, DollarSign, Check, X, Briefcase, Calendar,
   CheckCircle, ChevronDown, ChevronUp, RefreshCw, Phone, AlertCircle,
@@ -7,7 +7,7 @@ import {
   Shield, Upload
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
-import { acceptJob, declineJob, updateProviderProfile, getProviderProfile, uploadJobPhoto, getPendingQuoteRequests, updateQuoteRequest } from '../../lib/api'
+import { acceptJob, declineJob, updateProviderProfile, getProviderProfile } from '../../lib/api'
 import {
   getAvailableJobsWithDetails,
   getProAssignedJobsWithDetails,
@@ -17,20 +17,25 @@ import {
 } from '../../lib/proDashboard'
 import { serviceTypeLabel, yardSizeLabel } from '../../lib/labels'
 import JobPhotoGallery from '../../components/JobPhotoGallery'
+import PerServicePhotoUploader from '../../components/PerServicePhotoUploader'
+import ProJobCard from '../../components/ProJobCard'
+import ProStatusStepper from '../../components/ProStatusStepper'
 import AddonBadges from '../../components/AddonBadges'
+import { hydrateAddons } from '../../lib/addons'
 import { useProLocation } from '../../hooks/useProLocation'
 import { checkGeofence } from '../../lib/geo'
 
 export default function ProJobs() {
   const { user } = useAuth()
-  const [expandedJob, setExpandedJob] = useState<string | null>(null)
+  const [searchParams] = useSearchParams()
+  const bookingIdFromUrl = searchParams.get('booking')
+  // Auto-expand the booking passed in URL (e.g. from "Manage photos" link)
+  const [expandedJob, setExpandedJob] = useState<string | null>(bookingIdFromUrl)
   const [loading, setLoading] = useState(true)
   const [availableJobs, setAvailableJobs] = useState<ProBookingWithDetails[]>([])
   const [assignedJobs, setAssignedJobs] = useState<ProBookingWithDetails[]>([])
-  const [openQuotes, setOpenQuotes] = useState<any[]>([])
   const [isAvailable, setIsAvailable] = useState(true)
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
-  const [quoteActionInProgress, setQuoteActionInProgress] = useState<string | null>(null)
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   // Stripe Connect onboarding state — shows a banner if not fully set up
   const [stripeReady, setStripeReady] = useState<boolean | null>(null)
@@ -44,17 +49,15 @@ export default function ProJobs() {
     if (!user) return
     setLoading(true)
     try {
-      const [availRes, assignedRes, profileRes, quotesRes] = await Promise.all([
+      const [availRes, assignedRes, profileRes] = await Promise.all([
         getAvailableJobsWithDetails(),
         getProAssignedJobsWithDetails(user.id),
         getProviderProfile(user.id),
-        getPendingQuoteRequests(),
       ])
       if (availRes.error) console.error('Error loading available jobs:', availRes.error)
       if (assignedRes.error) console.error('Error loading assigned jobs:', assignedRes.error)
       setAvailableJobs(availRes.data || [])
       setAssignedJobs(assignedRes.data || [])
-      setOpenQuotes(quotesRes.data || [])
       // Compute Stripe Connect readiness for the banner
       const pd: any = profileRes.data
       setStripeConnectAccountId(pd?.stripe_connect_account_id || null)
@@ -66,21 +69,6 @@ export default function ProJobs() {
     } finally {
       setLoading(false)
     }
-  }
-
-  const handleSubmitQuote = async (quote: any, price: number) => {
-    setQuoteActionInProgress(quote.id)
-    const { error } = await updateQuoteRequest(quote.id, {
-      status: 'quoted',
-      quoted_price: price,
-    } as any)
-    setQuoteActionInProgress(null)
-    if (error) {
-      showToast('error', `Couldn't submit quote: ${error.message}`)
-      return
-    }
-    showToast('success', `Sent $${price} quote to ${quote.customer_name || 'customer'}!`)
-    setOpenQuotes(openQuotes.filter(q => q.id !== quote.id))
   }
 
   const showToast = (type: 'success' | 'error', message: string, durationMs: number = 4000) => {
@@ -412,99 +400,8 @@ export default function ProJobs() {
         </div>
       </div>
 
-      {/* Upcoming Scheduled Jobs */}
-      {activeAssigned.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">My Upcoming Jobs</h2>
-          <div className="space-y-3">
-            {activeAssigned.map((job) => (
-              <AssignedJobCard
-                key={job.id}
-                job={job}
-                expanded={expandedJob === job.id}
-                onToggle={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
-                onUpdate={handleProgressUpdate}
-                onMarkReadyForReview={handleMarkReadyForReview}
-                actionInProgress={actionInProgress === job.id}
-                formatDate={formatDate}
-                formatAddress={formatAddress}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Recently Completed — clickable to open detail view */}
-      {completedAssigned.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold text-slate-900 mb-4">Recently Completed</h2>
-          <div className="space-y-2">
-            {completedAssigned.slice(0, 5).map((job) => (
-              <button
-                key={job.id}
-                onClick={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
-                className="w-full text-left bg-white rounded-xl p-3 border border-slate-100 hover:border-[#22C55E] hover:shadow-sm transition-all"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <p className="text-sm font-medium text-slate-900">{job.customer_name || 'Customer'}</p>
-                      <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-medium">
-                        {yardSizeLabel(job.yard_size_category)}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500">{formatAddress(job)}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {formatDate(job.scheduled_date)} {job.scheduled_time_window || ''} · {serviceTypeLabel(job.service_type)}
-                    </p>
-                  </div>
-                  <div className="text-right flex items-center gap-2 flex-shrink-0 ml-3">
-                    <div>
-                      <p className="text-sm font-bold text-[#22C55E]">
-                        +${(job.provider_payout_amount || 0).toFixed(2)}
-                      </p>
-                      <p className="text-xs text-slate-400">earned</p>
-                    </div>
-                    {expandedJob === job.id ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
-                  </div>
-                </div>
-
-                {expandedJob === job.id && (
-                  <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
-                    <div className="grid grid-cols-3 gap-2 text-sm">
-                      <div>
-                        <p className="text-xs text-slate-500">Service</p>
-                        <p className="font-medium text-slate-900">{serviceTypeLabel(job.service_type)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-500">Frequency</p>
-                        <p className="font-medium text-slate-900 capitalize">{job.service_frequency.replace('_', '-')}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-500">Payout</p>
-                        <p className="font-medium text-[#22C55E]">${(job.provider_payout_amount || 0).toFixed(2)}</p>
-                      </div>
-                    </div>
-
-                    {/* Photos for this completed job */}
-                    <div>
-                      <p className="text-xs text-slate-500 mb-2">Photos you uploaded</p>
-                      <JobPhotoGallery
-                        bookingId={job.id}
-                        allowUpload={false}
-                        compact
-                      />
-                    </div>
-                  </div>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Available Jobs */}
-      <div>
+      {/* Available Jobs — main thing the pro should see, at the top */}
+      <div className="mb-8">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">
           Available Jobs {!isAvailable && <span className="text-sm font-normal text-slate-500">(paused)</span>}
         </h2>
@@ -541,131 +438,27 @@ export default function ProJobs() {
         )}
       </div>
 
-      {/* ============ QUOTE REQUESTS (custom jobs awaiting pro quote) ============ */}
-      {openQuotes.length > 0 && (
-        <div className="mt-8">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-7 h-7 bg-blue-100 rounded-full flex items-center justify-center">
-              <FileText className="text-blue-600" size={16} />
-            </div>
-            <h2 className="text-lg font-semibold text-slate-900">Quote Requests</h2>
-            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-              {openQuotes.length}
-            </span>
-          </div>
-          <p className="text-xs text-slate-500 mb-3">
-            Custom jobs from customers that need a price quote. Send them your best offer.
-          </p>
+      {/* Upcoming Scheduled Jobs — pro's already-accepted work */}
+      {activeAssigned.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">My Upcoming Jobs</h2>
           <div className="space-y-3">
-            {openQuotes.map((quote) => (
-              <QuoteRequestCard
-                key={quote.id}
-                quote={quote}
-                onSubmitQuote={handleSubmitQuote}
-                actionInProgress={quoteActionInProgress === quote.id}
+            {activeAssigned.map((job) => (
+              <ProJobCard
+                key={job.id}
+                job={job}
+                expanded={expandedJob === job.id}
+                onToggle={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
+                onUpdate={handleProgressUpdate}
+                onMarkReadyForReview={handleMarkReadyForReview}
+                actionInProgress={actionInProgress === job.id}
+                onPhotoUploaded={() => fetchJobs()}
               />
             ))}
           </div>
         </div>
       )}
-    </div>
-  )
-}
 
-function QuoteRequestCard({
-  quote, onSubmitQuote, actionInProgress,
-}: {
-  quote: any
-  onSubmitQuote: (q: any, price: number) => Promise<void>
-  actionInProgress: boolean
-}) {
-  const [price, setPrice] = useState<string>('')
-  const [expanded, setExpanded] = useState(false)
-
-  const propertyLabel = quote.property_type === 'other' && quote.property_type_other
-    ? quote.property_type_other
-    : quote.property_type?.charAt(0).toUpperCase() + (quote.property_type?.slice(1) || '')
-
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-3 mb-2">
-          <div>
-            <p className="font-semibold text-slate-900">
-              {propertyLabel} <span className="text-slate-500 font-normal text-sm">— Custom Quote</span>
-            </p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Submitted {new Date(quote.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-            </p>
-          </div>
-        </div>
-        <p className="text-sm text-slate-700 mb-3">
-          {quote.description || quote.notes || 'Customer needs custom service'}
-        </p>
-        <div className="flex flex-wrap gap-2 text-xs mb-3">
-          {quote.yard_size_category && (
-            <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded">
-              Yard: {quote.yard_size_category}
-            </span>
-          )}
-          {quote.service_frequency && (
-            <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded">
-              {quote.service_frequency}
-            </span>
-          )}
-          {quote.address && (
-            <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded flex items-center gap-1">
-              <MapPin size={10} /> {quote.address}
-            </span>
-          )}
-        </div>
-
-        {!expanded ? (
-          <button
-            onClick={() => setExpanded(true)}
-            className="w-full bg-[#22C55E] text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-[#16A34A] transition-colors"
-          >
-            Send a quote
-          </button>
-        ) : (
-          <div className="border-t border-slate-100 pt-3 mt-3">
-            <label className="block text-xs font-medium text-slate-700 mb-1.5">
-              Your price (USD)
-            </label>
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-medium">$</span>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  placeholder="0"
-                  className="w-full pl-7 pr-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#22C55E] focus:border-transparent"
-                />
-              </div>
-              <button
-                onClick={() => onSubmitQuote(quote, parseFloat(price))}
-                disabled={!price || parseFloat(price) <= 0 || actionInProgress}
-                className="bg-[#22C55E] text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-[#16A34A] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-              >
-                {actionInProgress ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                Send
-              </button>
-              <button
-                onClick={() => { setExpanded(false); setPrice('') }}
-                className="bg-slate-100 text-slate-700 px-3 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-            <p className="text-xs text-slate-500 mt-2">
-              Customer will see your quote in their "Pending Quotes" and can accept or decline.
-            </p>
-          </div>
-        )}
-      </div>
     </div>
   )
 }
@@ -743,7 +536,7 @@ function AvailableJobCard({
           <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
             {yardSizeLabel(job.yard_size_category)}
           </span>
-          <span className="bg-purple-50 text-purple-700 px-3 py-1 rounded-full text-xs font-medium">
+          <span className="bg-green-50 text-green-700 px-3 py-1 rounded-full text-xs font-medium">
             {formatDate(job.scheduled_date)} · {job.scheduled_time_window || 'Time TBD'}
           </span>
         </div>
@@ -819,286 +612,11 @@ function AvailableJobCard({
   )
 }
 
-function AssignedJobCard({
-  job, expanded, onToggle, onUpdate, onMarkReadyForReview, actionInProgress, formatDate, formatAddress,
-}: {
-  job: ProBookingWithDetails
-  expanded: boolean
-  onToggle: () => void
-  onUpdate: (job: ProBookingWithDetails, status: 'on_the_way' | 'arrived' | 'in_progress' | 'completed') => void
-  onMarkReadyForReview: (job: ProBookingWithDetails) => void
-  actionInProgress: boolean
-  formatDate: (d: string | null) => string
-  formatAddress: (j: ProBookingWithDetails) => string
-}) {
-  const statusInfo = getStatusInfo(job.booking_status)
-  const nextStep = getNextStep(job.booking_status)
-  const payout = job.provider_payout_amount ?? job.estimated_price
+// NOTE: the old in-file `AssignedJobCard` was removed on 2026-08-18. It had been
+// dead since assigned jobs moved to the shared <ProJobCard> component, and it
+// still referenced a `fetchJobs` that does not exist in its scope — so anyone
+// re-enabling it would have hit a ReferenceError on photo upload.
 
-  // Photo upload state
-  const [photoMode, setPhotoMode] = useState<'none' | 'before' | 'after'>('none')
-  const [uploadingPhoto, setUploadingPhoto] = useState(false)
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
-  const [photoError, setPhotoError] = useState<string | null>(null)
-  const beforeFileRef = useRef<HTMLInputElement>(null)
-  const afterFileRef = useRef<HTMLInputElement>(null)
-
-  // Determine if the next step requires a photo
-  const requiresBeforePhoto = nextStep?.action === 'in_progress' && !job.before_photo_url
-  const requiresAfterPhoto = nextStep?.action === 'completed' && !job.after_photo_url
-
-  const handlePhotoSelected = async (file: File, photoType: 'before' | 'after') => {
-    setPhotoError(null)
-
-    // Show preview
-    const reader = new FileReader()
-    reader.onload = (e) => setPhotoPreview(e.target?.result as string)
-    reader.readAsDataURL(file)
-
-    setUploadingPhoto(true)
-    const { data, error } = await uploadJobPhoto(job.id, photoType, file)
-    setUploadingPhoto(false)
-
-    if (error) {
-      setPhotoError(error.message)
-      setPhotoPreview(null)
-      return
-    }
-
-    // Success — proceed to status update
-    setPhotoMode('none')
-    setPhotoPreview(null)
-
-    // Trigger the status update
-    if (photoType === 'before') {
-      onUpdate(job, 'in_progress')
-    } else {
-      onUpdate(job, 'completed')
-    }
-  }
-
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-      <button
-        onClick={onToggle}
-        className={`w-full text-left p-4 ${statusInfo.bgClass} hover:brightness-95 transition-all`}
-      >
-        <div className="flex items-start justify-between mb-2">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <h3 className="font-semibold text-slate-900">{job.customer_name || 'Customer'}</h3>
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusInfo.badgeClass}`}>
-                {statusInfo.label}
-              </span>
-              <span className="text-xs px-1.5 py-0.5 bg-white/60 text-slate-700 rounded font-medium">
-                {yardSizeLabel(job.yard_size_category)}
-              </span>
-            </div>
-            <p className="text-sm text-slate-600">{formatAddress(job)}</p>
-          </div>
-          <div className="text-right flex items-center gap-2 flex-shrink-0">
-            <div>
-              <p className="text-xs text-slate-500">You'll earn</p>
-              <p className="text-xl font-bold text-[#22C55E]">${payout.toFixed(2)}</p>
-            </div>
-            {expanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
-          </div>
-        </div>
-        <div className="flex items-center gap-4 text-sm text-slate-600 mt-2 flex-wrap">
-          <span className="flex items-center gap-1">
-            <Clock size={14} /> {formatDate(job.scheduled_date)} · {job.scheduled_time_window || 'Time TBD'}
-          </span>
-          <span className="flex items-center gap-1">
-            <User size={14} /> {serviceTypeLabel(job.service_type)}
-          </span>
-        </div>
-      </button>
-
-      <div className="p-4">
-        {expanded && (
-          <div className="space-y-3 mb-4 pb-4 border-b border-slate-100">
-            {job.notes && (
-              <div className="flex items-start gap-2">
-                <AlertCircle size={16} className="text-amber-500 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-slate-500">Special Instructions</p>
-                  <p className="text-sm text-slate-700 whitespace-pre-line">{job.notes}</p>
-                </div>
-              </div>
-            )}
-            {job.customer_phone && (
-              <div className="flex items-center gap-2">
-                <Phone size={16} className="text-slate-400" />
-                <a href={`tel:${job.customer_phone}`} className="text-sm text-blue-600 hover:underline">
-                  {job.customer_phone}
-                </a>
-              </div>
-            )}
-            <a
-              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(job))}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1"
-            >
-              <ExternalLink size={14} /> Open in Google Maps
-            </a>
-          </div>
-        )}
-
-        {/* Multi-photo gallery: before, after, plus up to 3 additional */}
-        {(job.before_photo_url || job.after_photo_url) && (
-          <div className="mb-4">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                Job photos
-              </div>
-              {job.booking_status !== 'completed' && (
-                <span className="text-xs text-slate-400">
-                  Show up to 5 photos of the property
-                </span>
-              )}
-            </div>
-            <JobPhotoGallery
-              bookingId={job.id}
-              allowUpload={job.booking_status !== 'completed'}
-              compact
-            />
-          </div>
-        )}
-
-        {/* Photo upload modal — shown when a photo is required */}
-        {photoMode !== 'none' && (
-          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-4">
-            <div className="flex items-start gap-2 mb-3">
-              <Camera className="text-amber-600 flex-shrink-0 mt-0.5" size={20} />
-              <div>
-                <h4 className="font-semibold text-amber-900">
-                  {photoMode === 'before' ? 'Take a BEFORE photo' : 'Take an AFTER photo'}
-                </h4>
-                <p className="text-sm text-amber-800">
-                  {photoMode === 'before'
-                    ? 'Required to start work. Shows the customer the condition of the lawn.'
-                    : 'Required to mark complete. Shows the customer the work was done.'}
-                </p>
-              </div>
-            </div>
-
-            {photoPreview ? (
-              <div>
-                <img src={photoPreview} alt="Preview" className="w-full aspect-video object-cover rounded-lg mb-3" />
-                {uploadingPhoto && (
-                  <div className="flex items-center justify-center gap-2 text-amber-700 text-sm py-2">
-                    <Loader2 className="animate-spin" size={16} />
-                    Uploading...
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div>
-                <input
-                  ref={photoMode === 'before' ? beforeFileRef : afterFileRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    if (file) handlePhotoSelected(file, photoMode)
-                  }}
-                />
-                <button
-                  onClick={() => (photoMode === 'before' ? beforeFileRef : afterFileRef).current?.click()}
-                  className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
-                >
-                  <Camera size={18} />
-                  {photoMode === 'before' ? 'Take before photo' : 'Take after photo'}
-                </button>
-              </div>
-            )}
-
-            {photoError && (
-              <p className="text-sm text-red-600 mt-2">{photoError}</p>
-            )}
-
-            <button
-              onClick={() => { setPhotoMode('none'); setPhotoPreview(null); setPhotoError(null) }}
-              className="w-full text-sm text-slate-600 hover:text-slate-800 mt-2 py-1"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-
-        {/* Action button */}
-        {nextStep && photoMode === 'none' && (
-          <>
-            {requiresBeforePhoto || requiresAfterPhoto ? (
-              <button
-                onClick={() => setPhotoMode(requiresBeforePhoto ? 'before' : 'after')}
-                disabled={actionInProgress || uploadingPhoto}
-                className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                <Camera size={18} />
-                {requiresBeforePhoto ? 'Take BEFORE photo to start' : 'Take AFTER photo to complete'}
-              </button>
-            ) : (
-              <button
-                onClick={() => onUpdate(job, nextStep.action)}
-                disabled={actionInProgress}
-                className="w-full bg-[#22C55E] text-white py-3 rounded-xl font-semibold hover:bg-[#16A34A] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {actionInProgress ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
-                  <CheckCircle size={18} />
-                )}
-                {nextStep.label}
-              </button>
-            )}
-          </>
-        )}
-
-        {/* Mark Ready for Review — shown when in_progress + photos uploaded */}
-        {job.booking_status === 'in_progress' && job.after_photo_url && !requiresAfterPhoto && photoMode === 'none' && (
-          <div className="border-t border-slate-200 pt-3 mt-3">
-            <p className="text-xs text-slate-500 mb-2">
-              Photos uploaded. Mark the job as done when all addons are complete.
-            </p>
-            <button
-              onClick={() => onMarkReadyForReview(job)}
-              disabled={actionInProgress}
-              className="w-full bg-gradient-to-r from-emerald-500 to-[#22C55E] text-white py-3 rounded-xl font-semibold hover:from-emerald-600 hover:to-[#16A34A] transition-colors flex items-center justify-center gap-2 disabled:opacity-50 shadow-md"
-            >
-              {actionInProgress ? (
-                <Loader2 size={18} className="animate-spin" />
-              ) : (
-                <Shield size={18} />
-              )}
-              Mark Ready for Customer Review
-            </button>
-          </div>
-        )}
-
-        {/* Pending review banner — when in the 24h window */}
-        {job.booking_status === 'pending_review' && (
-          <div className="border-t border-slate-200 pt-3 mt-3">
-            <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-3 flex items-center gap-3">
-              <div className="w-9 h-9 bg-amber-500 rounded-full flex items-center justify-center flex-shrink-0">
-                <Shield className="text-white" size={18} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-amber-900 text-sm">Awaiting customer review</p>
-                <p className="text-xs text-amber-800 mt-0.5">
-                  Customer has 24h to approve. Payment auto-releases if they don't act.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
 
 function getStatusInfo(status: string): { label: string; bgClass: string; badgeClass: string } {
   switch (status) {
@@ -1123,8 +641,8 @@ function getStatusInfo(status: string): { label: string; bgClass: string; badgeC
     case 'in_progress':
       return {
         label: 'In progress',
-        bgClass: 'bg-gradient-to-r from-purple-50 to-fuchsia-50 border-b border-purple-100',
-        badgeClass: 'bg-purple-100 text-purple-700',
+        bgClass: 'bg-gradient-to-r from-green-50 to-emerald-50 border-b border-green-100',
+        badgeClass: 'bg-green-100 text-green-700',
       }
     case 'completed':
       return {

@@ -130,9 +130,11 @@ serve(async (req) => {
 
     // Check if there's a pro with Stripe Connect set up for this booking
     const proConnectAccountId = await getProConnectAccount(booking_id)
-    const platformFeeCents = proConnectAccountId
-      ? Math.round(amountInCents * PLATFORM_FEE_PERCENT / 100)
-      : 0
+    // MowList's cut is the same whether or not a pro is attached yet — the pro
+    // is usually assigned AFTER payment, and the payout is transferred at
+    // capture time. Computing the fee only when a pro already existed meant
+    // provider_payout_amount was recorded as the full ticket price.
+    const platformFeeCents = Math.round(amountInCents * PLATFORM_FEE_PERCENT / 100)
 
     // Build the PaymentIntent
     const params = new URLSearchParams()
@@ -156,11 +158,18 @@ serve(async (req) => {
       params.append('setup_future_usage', 'off_session')
     }
 
-    // If pro has Stripe Connect, transfer funds (minus platform fee) to them
-    if (proConnectAccountId && platformFeeCents > 0) {
-      params.append('application_fee_amount', platformFeeCents.toString())
-      params.append('transfer_data[destination]', proConnectAccountId)
-    }
+    // NOTE ON PAYOUTS — do NOT add transfer_data / application_fee_amount here.
+    //
+    // `transfer_data[destination]` (a "destination charge") has to name the
+    // connected account at PaymentIntent creation time. On MowList the customer
+    // pays BEFORE a pro accepts the job, so at this moment there usually is no
+    // pro yet — which is exactly why payouts were landing in the platform
+    // account instead of the pro's.
+    //
+    // MowList uses "separate charges and transfers" instead: the charge lands
+    // on the platform account, and capture-payment creates a Transfer to the
+    // pro's connected account once the job is approved and the pro is known.
+    // `platformFeeCents` below is kept for reporting/metadata only.
 
     params.append('metadata[booking_id]', booking_id)
     params.append('metadata[mowlist_user_id]', user_id)
@@ -184,6 +193,25 @@ serve(async (req) => {
     if (!response.ok) {
       console.error('Stripe error:', JSON.stringify(data))
       throw new Error(data.error?.message || 'Stripe API error')
+    }
+
+    // Record the PaymentIntent on the booking. capture-payment reads
+    // `bookings.payment_intent_id` to know what to capture — nothing was ever
+    // writing it, so every capture failed with "No payment intent on this
+    // booking" and authorized funds silently expired instead of being charged.
+    const { error: linkErr } = await supabaseAdmin
+      .from('bookings')
+      .update({
+        payment_intent_id: data.id,
+        platform_fee: platformFeeCents / 100,
+        provider_payout_amount: (amountInCents - platformFeeCents) / 100,
+      })
+      .eq('id', booking_id)
+
+    if (linkErr) {
+      // Don't fail the payment over this, but make it loud — an unlinked
+      // PaymentIntent means the money can never be captured.
+      console.error('CRITICAL: could not link payment_intent to booking', booking_id, linkErr)
     }
 
     return new Response(
