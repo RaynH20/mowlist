@@ -77,19 +77,21 @@ export default function Header() {
               <>
                 <Link
                   to={getDashboardLink()}
-                  className="flex items-center gap-2 text-slate-600 hover:text-[#22C55E] transition-colors font-medium"
+                  className="flex items-center gap-2 text-slate-600 hover:text-[#22C55E] transition-colors p-1"
+                  title={user.email || 'Dashboard'}
+                  aria-label="Go to dashboard"
                 >
-                  <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center">
-                    <User size={16} className="text-slate-600" />
+                  <div className="w-9 h-9 bg-slate-200 rounded-full flex items-center justify-center">
+                    <User size={18} className="text-slate-600" />
                   </div>
-                  <span className="text-sm">{user.email}</span>
                 </Link>
                 <button
                   onClick={handleSignOut}
-                  className="flex items-center gap-2 text-slate-600 hover:text-red-500 transition-colors font-medium"
+                  className="flex items-center text-slate-600 hover:text-red-500 transition-colors p-1"
+                  title="Sign Out"
+                  aria-label="Sign out"
                 >
-                  <LogOut size={18} />
-                  Sign Out
+                  <LogOut size={20} />
                 </button>
               </>
             ) : (

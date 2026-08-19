@@ -132,7 +132,11 @@ export async function getProAssignedJobsWithDetails(providerId: string): Promise
       return { data: [], error: null }
     }
 
-    // Fetch all assigned bookings (active + recent completed)
+    // Fetch all assigned bookings (active + pending_review + recent completed)
+    // IMPORTANT: pending_review is included here so the pro can find jobs
+    // that are done and waiting on customer approval. Without it, those
+    // jobs vanish from the pro's view entirely once they leave the active
+    // "in_progress" state.
     const { data: bookings, error: bookingsErr } = await supabase
       .from('bookings')
       .select('*')
@@ -142,6 +146,7 @@ export async function getProAssignedJobsWithDetails(providerId: string): Promise
         'on_the_way',
         'arrived',
         'in_progress',
+        'pending_review',
         'completed',
       ])
       .order('scheduled_date', { ascending: true })
@@ -481,6 +486,21 @@ export async function updateBookingProgress(
       updates.ready_for_review_at = now.toISOString()
       updates.auto_capture_at = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
       // Don't set completed_at yet — that happens when customer approves
+
+      // If the booking was previously disputed, mark the dispute as resolved
+      // by the pro re-fixing the issue, and clear the active dispute_reason.
+      // (We keep dispute_count so we can see if it's a repeat issue.)
+      const { data: prev } = await supabase
+        .from('bookings')
+        .select('booking_status, dispute_reason')
+        .eq('id', bookingId)
+        .maybeSingle()
+      if (prev?.booking_status === 'disputed') {
+        updates.dispute_resolution = 'pro_refixed'
+        updates.dispute_resolved_at = now.toISOString()
+        // Keep dispute_reason on the row so the pro can see what was wrong
+        // until the customer re-approves. We clear it on final approval.
+      }
     }
 
     const { error: bookingErr } = await supabase
@@ -545,33 +565,44 @@ export async function markReadyForReview(
     if (booking.booking_status === 'completed') {
       return { error: new Error('Already completed') }
     }
+    // Allowed source statuses:
+    //   in_progress — first time marking complete
+    //   disputed    — pro re-fixed the issue after customer dispute
+    if (!['in_progress', 'disputed'].includes(booking.booking_status)) {
+      return { error: new Error(`Cannot mark ready from status: ${booking.booking_status}`) }
+    }
+
+    // Fetch all photos for this booking (booking_photos is the source of truth for
+    // per-addon photos; we still fall back to before_photo_url/after_photo_url for
+    // legacy base-mow photos that predate migration 23)
+    const { data: photos, error: pErr } = await supabase
+      .from('booking_photos')
+      .select('addon_id, photo_role')
+      .eq('booking_id', bookingId)
+    if (pErr) throw pErr
+    const allPhotos = (photos || []) as Array<{ addon_id: string | null; photo_role: string }>
 
     // Validate photos
     const missing: string[] = []
-    if (!booking.before_photo_url) missing.push('Before photo of lawn')
-    if (!booking.after_photo_url) missing.push('After photo of lawn')
 
-    // Check per-addon photos
+    // Base mow: needs 1 before + 1 after. Prefer booking_photos (addon_id IS NULL),
+    // fall back to legacy before_photo_url/after_photo_url columns.
+    const hasBaseBefore = allPhotos.some((p) => p.addon_id === null && p.photo_role === 'before') || !!booking.before_photo_url
+    const hasBaseAfter = allPhotos.some((p) => p.addon_id === null && p.photo_role === 'after') || !!booking.after_photo_url
+    if (!hasBaseBefore) missing.push('Before photo of Lawn Mowing')
+    if (!hasBaseAfter) missing.push('After photo of Lawn Mowing')
+
+    // Per-addon photos: 1 before + 1 after for each selected addon
     const selectedAddons = (booking.selected_addons as any[]) || []
-    if (selectedAddons.length > 0) {
-      // Fetch all photos for this booking
-      const { data: photos, error: pErr } = await supabase
-        .from('booking_photos')
-        .select('addon_id, photo_role')
-        .eq('booking_id', bookingId)
-
-      if (pErr) throw pErr
-
-      for (const addon of selectedAddons) {
-        const hasBefore = (photos || []).some(
-          (p: any) => p.addon_id === addon.id && p.photo_role === 'before'
-        )
-        const hasAfter = (photos || []).some(
-          (p: any) => p.addon_id === addon.id && p.photo_role === 'after'
-        )
-        if (!hasBefore) missing.push(`Before photo of ${addon.name}`)
-        if (!hasAfter) missing.push(`After photo of ${addon.name}`)
-      }
+    for (const addon of selectedAddons) {
+      const hasBefore = allPhotos.some(
+        (p) => p.addon_id === addon.id && p.photo_role === 'before'
+      )
+      const hasAfter = allPhotos.some(
+        (p) => p.addon_id === addon.id && p.photo_role === 'after'
+      )
+      if (!hasBefore) missing.push(`Before photo of ${addon.name}`)
+      if (!hasAfter) missing.push(`After photo of ${addon.name}`)
     }
 
     if (missing.length > 0) {

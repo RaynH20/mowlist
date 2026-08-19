@@ -77,7 +77,7 @@ export default function ReviewsList({
     return (
       <div className="text-center py-6 text-sm text-slate-500">
         <Star className="mx-auto text-slate-300 mb-2" size={24} />
-        No reviews yet. Be the first to leave one after your next mow.
+        No reviews yet. Complete your next job to earn one from your customer.
       </div>
     )
   }

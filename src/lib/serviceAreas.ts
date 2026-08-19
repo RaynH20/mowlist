@@ -20,6 +20,12 @@ export interface CityInfo {
   status: ServiceStatus
   /** First 3 digits of zip codes that match this city */
   zipPrefixes: string[]
+  /** Approximate city-center latitude (for the service area map) */
+  lat?: number
+  /** Approximate city-center longitude (for the service area map) */
+  lng?: number
+  /** Service radius in miles (for the map circle) */
+  radiusMiles?: number
   /** Human-readable note (e.g. "1 pro available" or "Be the first") */
   note?: string
 }
@@ -82,20 +88,20 @@ export const ALL_STATES: StateInfo[] = [
 // Live + launching cities (the ones with real status)
 export const ACTIVE_CITIES: CityInfo[] = [
   // === LIVE: Austin metro ===
-  { city: 'Austin', stateCode: 'TX', status: 'live', zipPrefixes: ['787', '733'], note: 'Pros available now' },
-  { city: 'Round Rock', stateCode: 'TX', status: 'live', zipPrefixes: ['78664', '78665', '78681'], note: 'Pros available now' },
-  { city: 'Cedar Park', stateCode: 'TX', status: 'live', zipPrefixes: ['78613'], note: 'Pros available now' },
-  { city: 'Pflugerville', stateCode: 'TX', status: 'live', zipPrefixes: ['78660'], note: 'Pros available now' },
-  { city: 'Lakeway', stateCode: 'TX', status: 'live', zipPrefixes: ['78734'], note: 'Pros available now' },
-  { city: 'Georgetown', stateCode: 'TX', status: 'live', zipPrefixes: ['78626', '78628'], note: 'Pros available now' },
+  { city: 'Austin', stateCode: 'TX', status: 'live', zipPrefixes: ['787', '733'], lat: 30.2672, lng: -97.7431, radiusMiles: 20, note: 'Pros available now' },
+  { city: 'Round Rock', stateCode: 'TX', status: 'live', zipPrefixes: ['78664', '78665', '78681'], lat: 30.5083, lng: -97.6789, radiusMiles: 10, note: 'Pros available now' },
+  { city: 'Cedar Park', stateCode: 'TX', status: 'live', zipPrefixes: ['78613'], lat: 30.5052, lng: -97.8203, radiusMiles: 10, note: 'Pros available now' },
+  { city: 'Pflugerville', stateCode: 'TX', status: 'live', zipPrefixes: ['78660'], lat: 30.4394, lng: -97.6200, radiusMiles: 10, note: 'Pros available now' },
+  { city: 'Lakeway', stateCode: 'TX', status: 'live', zipPrefixes: ['78734'], lat: 30.3638, lng: -97.9845, radiusMiles: 8, note: 'Pros available now' },
+  { city: 'Georgetown', stateCode: 'TX', status: 'live', zipPrefixes: ['78626', '78628'], lat: 30.6332, lng: -97.6779, radiusMiles: 10, note: 'Pros available now' },
 
   // === LAUNCHING: Wilkes-Barre / NE Pennsylvania (Rachel's local promotion) ===
-  { city: 'Wilkes-Barre', stateCode: 'PA', status: 'launching', zipPrefixes: ['187', '18702', '18705', '18706', '18711'], note: 'Be the first pro here' },
-  { city: 'Scranton', stateCode: 'PA', status: 'launching', zipPrefixes: ['185', '18503', '18504', '18505', '18508', '18509', '18510'], note: 'Be the first pro here' },
-  { city: 'Kingston', stateCode: 'PA', status: 'launching', zipPrefixes: ['18704'], note: 'Be the first pro here' },
-  { city: 'Mountain Top', stateCode: 'PA', status: 'launching', zipPrefixes: ['18707'], note: 'Be the first pro here' },
-  { city: 'Pittston', stateCode: 'PA', status: 'launching', zipPrefixes: ['18640', '18641', '18642', '18643', '18644'], note: 'Be the first pro here' },
-  { city: 'Hazleton', stateCode: 'PA', status: 'launching', zipPrefixes: ['18201', '18202'], note: 'Be the first pro here' },
+  { city: 'Wilkes-Barre', stateCode: 'PA', status: 'launching', zipPrefixes: ['187', '18702', '18705', '18706', '18711'], lat: 41.2459, lng: -75.8813, radiusMiles: 15, note: 'Be the first pro here' },
+  { city: 'Scranton', stateCode: 'PA', status: 'launching', zipPrefixes: ['185', '18503', '18504', '18505', '18508', '18509', '18510'], lat: 41.4087, lng: -75.6624, radiusMiles: 12, note: 'Be the first pro here' },
+  { city: 'Kingston', stateCode: 'PA', status: 'launching', zipPrefixes: ['18704'], lat: 41.2617, lng: -75.8969, radiusMiles: 8, note: 'Be the first pro here' },
+  { city: 'Mountain Top', stateCode: 'PA', status: 'launching', zipPrefixes: ['18707'], lat: 41.1700, lng: -75.9046, radiusMiles: 8, note: 'Be the first pro here' },
+  { city: 'Pittston', stateCode: 'PA', status: 'launching', zipPrefixes: ['18640', '18641', '18642', '18643', '18644'], lat: 41.3276, lng: -75.7894, radiusMiles: 10, note: 'Be the first pro here' },
+  { city: 'Hazleton', stateCode: 'PA', status: 'launching', zipPrefixes: ['18201', '18202'], lat: 40.9584, lng: -75.9746, radiusMiles: 10, note: 'Be the first pro here' },
 ]
 
 // Major US metros organized by region — used for the "coming soon" sections

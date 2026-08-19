@@ -2,7 +2,7 @@ import { CheckCircle, Clock, Truck, MapPin, Scissors, Award, XCircle, AlertCircl
 import type { BookingStatus, Address } from '../lib/database.types'
 import LiveTrackingMap from './LiveTrackingMap'
 import ErrorBoundary from './ErrorBoundary'
-import JobPhotoGallery from './JobPhotoGallery'
+import CustomerPhotoViewer from './CustomerPhotoViewer'
 import AddonBadges from './AddonBadges'
 import { hydrateAddons } from '../lib/addons'
 
@@ -18,7 +18,7 @@ const STATUS_FLOW: StatusStep[] = [
   { id: 'booked', label: 'Confirmed', description: 'Pro is scheduled', icon: CheckCircle },
   { id: 'on_the_way', label: 'On the way', description: 'Pro is heading to you', icon: Truck },
   { id: 'arrived', label: 'Arrived', description: 'Pro is on site', icon: MapPin },
-  { id: 'in_progress', label: 'Mowing', description: 'Service in progress', icon: Scissors },
+  { id: 'in_progress', label: 'Working', description: 'Service in progress', icon: Scissors },
   { id: 'pending_review', label: 'Awaiting Review', description: 'Pro done — your turn to review', icon: Shield },
   { id: 'completed', label: 'Completed', description: 'Job done — enjoy your lawn!', icon: Award },
 ]
@@ -165,7 +165,7 @@ export default function BookingStatusTracker({
 
       {/* Progress bar — desktop / tablet horizontal, mobile vertical */}
       <div className={compact ? '' : 'bg-white border border-slate-200 rounded-2xl p-6'}>
-        <div className="flex flex-col md:flex-row gap-4 md:gap-0">
+        <div className="flex flex-col md:flex-row gap-4 md:gap-3">
           {STATUS_FLOW.map((step, i) => {
             const isCompleted = i < currentIdx
             const isCurrent = i === currentIdx
@@ -175,7 +175,7 @@ export default function BookingStatusTracker({
             return (
               <div
                 key={step.id}
-                className={`flex md:flex-col md:flex-1 items-start md:items-center gap-3 md:gap-2 ${
+                className={`flex md:flex-col md:flex-1 md:min-w-0 items-start md:items-center gap-3 md:gap-2 ${
                   i > 0 ? 'md:relative' : ''
                 }`}
               >
@@ -203,16 +203,16 @@ export default function BookingStatusTracker({
                 </div>
 
                 {/* Label */}
-                <div className="md:text-center md:mt-2">
+                <div className="md:text-center md:mt-2 md:w-full md:px-1">
                   <div
-                    className={`text-sm font-semibold ${
+                    className={`text-xs md:text-[11px] lg:text-xs font-semibold leading-tight ${
                       isCurrent ? 'text-[#16A34A]' : isCompleted ? 'text-slate-900' : 'text-slate-400'
                     }`}
                   >
                     {step.label}
                   </div>
                   {!compact && (
-                    <div className={`text-xs mt-0.5 ${isPending ? 'text-slate-400' : 'text-slate-500'}`}>
+                    <div className={`text-[10px] md:text-[9px] lg:text-[10px] mt-1 leading-tight ${isPending ? 'text-slate-400' : 'text-slate-500'} hidden md:block`}>
                       {step.description}
                     </div>
                   )}
@@ -223,16 +223,25 @@ export default function BookingStatusTracker({
         </div>
       </div>
 
-      {/* Photo gallery (only when at least one photo exists).
-          Customer side: view-only. Pro side: can add/delete via the
-          allowUpload prop in the pro's job card. */}
-      {(beforePhotoUrl || afterPhotoUrl) && bookingId && (
+      {/* Customer-side photo viewer. Only shown once pro is on-site or
+          further — no point showing an empty "No photos yet" placeholder
+          for early-state bookings. */}
+      {bookingId && ['arrived', 'in_progress', 'mowing', 'pending_review', 'disputed', 'completed'].includes(status) && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6">
           <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
             <Camera size={18} className="text-slate-500" />
             Job photos
           </h3>
-          <JobPhotoGallery bookingId={bookingId} allowUpload={false} />
+          <CustomerPhotoViewer
+            bookingId={bookingId}
+            selectedAddons={selectedAddons}
+            reviewStatus={
+              status === 'completed' ? 'approved'
+                : status === 'disputed' ? 'disputed'
+                : status === 'pending_review' ? 'pending'
+                : 'none'
+            }
+          />
         </div>
       )}
 
@@ -244,7 +253,12 @@ export default function BookingStatusTracker({
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-6">
           <div className="flex items-center gap-2 mb-3">
             <MapPinned className="text-blue-600" size={20} />
-            <h3 className="font-semibold text-slate-900">Your pro is on the way</h3>
+            <h3 className="font-semibold text-slate-900">
+              {status === 'on_the_way' && 'Your pro is on the way'}
+              {status === 'arrived' && 'Your pro is on site'}
+              {status === 'in_progress' && 'Your pro is mowing'}
+              {status === 'pending_review' && 'Awaiting your review'}
+            </h3>
           </div>
           {(proLat != null && proLng != null) || (address && (address as any).lat && (address as any).lng) ? (
             <ErrorBoundary name="LiveTrackingMap">
@@ -260,7 +274,12 @@ export default function BookingStatusTracker({
             <div className="bg-white rounded-xl border border-blue-100 p-4 flex items-start gap-3">
               <div className="w-2 h-2 bg-[#22C55E] rounded-full animate-pulse mt-2 flex-shrink-0" />
               <div>
-                <p className="text-sm font-medium text-slate-900">Your pro is heading to you</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {status === 'on_the_way' && 'Your pro is heading to you'}
+                  {status === 'arrived' && 'Your pro is on site and getting set up'}
+                  {status === 'in_progress' && 'Your pro is working on your lawn'}
+                  {status === 'pending_review' && 'Pro has marked the job as done'}
+                </p>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Live map tracking will appear here as soon as your pro's location is available.
                 </p>
