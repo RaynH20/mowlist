@@ -7,6 +7,7 @@ import { useAuth } from '../lib/auth-context'
 import { supabase } from '../lib/supabase'
 import { createAddress, createBooking } from '../lib/api'
 import { geocodeAddress } from '../lib/geocode'
+import { calculateAddonTotal, hydrateAddons } from '../lib/addons'
 import {
   createPaymentIntent,
   listPaymentMethods,
@@ -98,7 +99,7 @@ function CheckoutForm() {
       .from('bookings')
       .select(`
         id, booking_status, estimated_price, scheduled_date, scheduled_time_window,
-        yard_size_category, service_frequency, address_id,
+        yard_size_category, service_frequency, address_id, selected_addons,
         address:addresses(street_1, city, state, zip_code),
         pro:provider_profiles(display_name)
       `)
@@ -122,6 +123,20 @@ function CheckoutForm() {
   const total = isPayingExisting && existingBooking
     ? Number(existingBooking.estimated_price)
     : basePrice + serviceFee
+
+  // Add-ons the customer picked at booking time. BookPage already rolled their
+  // price into estimated_price, so the charge has always been correct — but
+  // nothing on this page ever displayed them, which is why mulching seemed to
+  // vanish between booking and checkout. Derive the base by subtracting the
+  // add-on total back out so the summary adds up to what we're charging.
+  const bookingAddons = isPayingExisting
+    ? ((existingBooking?.selected_addons as any[] | null) ?? null)
+    : null
+  const addonList = hydrateAddons(bookingAddons)
+  const addonTotal = calculateAddonTotal(bookingAddons)
+  const displayBase = isPayingExisting && existingBooking
+    ? Math.max(0, Number(existingBooking.estimated_price) - addonTotal)
+    : basePrice
 
   // Load saved payment methods
   useEffect(() => {
@@ -294,6 +309,9 @@ function CheckoutForm() {
             paymentIntentId: paymentIntent.id,
             serviceType,
             lawnSize,
+            // BookingConfirmationPage already knows how to render these — it
+            // was just never handed them, so the add-on block never appeared.
+            selectedAddons: bookingAddons,
           },
         })
       } else {
@@ -365,11 +383,34 @@ function CheckoutForm() {
                 <h2 className="font-semibold text-slate-900 mb-3">Service</h2>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium text-slate-900">{serviceLabels[lawnSize] || 'Lawn Service'}</p>
-                    <p className="text-sm text-slate-500">Recurring weekly service</p>
+                    <p className="font-medium text-slate-900">
+                      {(isPayingExisting && existingBooking
+                        ? serviceLabels[existingBooking.yard_size_category === 'standard'
+                            ? 'medium'
+                            : existingBooking.yard_size_category]
+                        : serviceLabels[lawnSize]) || 'Lawn Service'}
+                    </p>
+                    <p className="text-sm text-slate-500">Lawn mowing</p>
                   </div>
-                  <p className="font-semibold text-slate-900">${basePrice.toFixed(2)}</p>
+                  <p className="font-semibold text-slate-900">${displayBase.toFixed(2)}</p>
                 </div>
+
+                {/* Add-ons the customer selected at booking time */}
+                {addonList.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+                      Add-ons
+                    </p>
+                    {addonList.map((a) => (
+                      <div key={a.id} className="flex items-center justify-between text-sm">
+                        <span className="text-slate-700">
+                          {a.icon} {a.name}
+                        </span>
+                        <span className="text-slate-900">${a.price.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Contact info */}
@@ -591,6 +632,18 @@ function CheckoutForm() {
                         </div>
                       </div>
                     )}
+                    <div className="border-t border-slate-200 pt-3 space-y-1.5">
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">Lawn mowing</span>
+                        <span className="text-slate-900">${displayBase.toFixed(2)}</span>
+                      </div>
+                      {addonList.map((a) => (
+                        <div key={a.id} className="flex justify-between">
+                          <span className="text-slate-600">{a.icon} {a.name}</span>
+                          <span className="text-slate-900">${a.price.toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
                     <div className="border-t border-slate-200 pt-3 flex justify-between font-semibold text-base">
                       <span className="text-slate-900">Total</span>
                       <span className="text-[#22C55E]">${total.toFixed(2)}</span>
