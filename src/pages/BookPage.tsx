@@ -711,6 +711,7 @@ export default function BookPage() {
                           state: savedAddress.state,
                           zipCode: savedAddress.zip_code,
                         }))
+                        nextStep()
                       }}
                       className="flex-1 bg-[#22C55E] text-white py-2.5 rounded-lg font-medium hover:bg-[#16A34A] transition-colors"
                     >

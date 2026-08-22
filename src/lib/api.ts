@@ -877,12 +877,43 @@ export async function getBookingPhotos(bookingId: string): Promise<{ data: Booki
  */
 export async function deleteBookingPhoto(photoId: string): Promise<{ error: Error | null }> {
   try {
+    // Look up the photo URL first so we can also delete the file from storage
+    const { data: photo, error: fetchErr } = await supabase
+      .from('booking_photos')
+      .select('photo_url')
+      .eq('id', photoId)
+      .single()
+    if (fetchErr) {
+      // Fall through to row delete anyway — worst case we leave an orphan
+      // file but at least the row is gone.
+      console.warn('Could not fetch photo before delete:', fetchErr)
+    }
+
+    // Delete the row
     const { error } = await supabase
       .from('booking_photos')
       .delete()
       .eq('id', photoId)
-
     if (error) throw error
+
+    // Best-effort: also delete the file from storage so it doesn't pile up
+    if (photo?.photo_url) {
+      try {
+        const url = new URL(photo.photo_url)
+        // Storage URLs look like:
+        //   https://<ref>.supabase.co/storage/v1/object/public/job-photos/<filename>
+        //   https://<ref>.supabase.co/storage/v1/object/sign/job-photos/<filename>?...
+        const match = url.pathname.match(/\/storage\/v1\/object\/(?:public|sign)\/job-photos\/(.+?)(?:\?|$)/)
+        if (match) {
+          const path = decodeURIComponent(match[1])
+          await supabase.storage.from('job-photos').remove([path])
+        }
+      } catch (storageErr) {
+        // Don't fail the whole delete if storage cleanup fails
+        console.warn('Could not delete photo from storage:', storageErr)
+      }
+    }
+
     return { error: null }
   } catch (error) {
     return { error: error as Error }
