@@ -1,13 +1,35 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Briefcase, Calendar, DollarSign, MapPin, User, LogOut, Home, Menu, X } from 'lucide-react'
-import { useState } from 'react'
+import { Briefcase, Calendar, DollarSign, MapPin, User, LogOut, Home, Menu, X, Scissors } from 'lucide-react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../lib/auth-context'
+import { supabase } from '../lib/supabase'
 
 export default function ProLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const { signOut, user } = useAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [profileName, setProfileName] = useState<string | null>(null)
+  const [profileAvatar, setProfileAvatar] = useState<string | null>(null)
+
+  // Fetch the pro's display name + avatar for the sidebar.
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    supabase
+      .from('provider_profiles')
+      .select('display_name, profile_image_url')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return
+        if (data) {
+          setProfileName(data.display_name || null)
+          setProfileAvatar((data as any).profile_image_url ?? null)
+        }
+      })
+    return () => { cancelled = true }
+  }, [user])
 
   const handleSignOut = async () => {
     await signOut()
@@ -30,9 +52,14 @@ export default function ProLayout() {
     <>
       <div className="p-6 border-b border-blue-800">
         <div className="flex items-start justify-between gap-2">
-          <Link to="/" className="text-xl font-bold" onClick={() => setIsMobileMenuOpen(false)}>
-            <span className="text-[#22C55E]">MowList</span>
-            <span className="text-white"> Pro</span>
+          <Link to="/" className="flex items-center gap-2 text-xl font-bold" onClick={() => setIsMobileMenuOpen(false)}>
+            <span className="w-8 h-8 bg-[#22C55E] rounded-lg flex items-center justify-center flex-shrink-0">
+              <Scissors className="text-white" size={16} />
+            </span>
+            <span>
+              <span className="text-white">MowList</span>
+              <span className="text-[#22C55E]"> Pro</span>
+            </span>
           </Link>
           <button
             onClick={handleSignOut}
@@ -43,8 +70,25 @@ export default function ProLayout() {
             <LogOut size={16} />
           </button>
         </div>
-        {user?.email && (
-          <p className="text-xs text-blue-200 mt-1 truncate">{user.email}</p>
+        {(profileName || profileAvatar) && (
+          <div className="flex items-center gap-2 mt-3">
+            <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center overflow-hidden flex-shrink-0">
+              {profileAvatar ? (
+                <img
+                  src={profileAvatar}
+                  alt={profileName || ''}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-white font-semibold text-sm">
+                  {(profileName || '?').split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase()}
+                </span>
+              )}
+            </div>
+            {profileName && (
+              <p className="text-sm text-white font-medium truncate">{profileName}</p>
+            )}
+          </div>
         )}
       </div>
       <nav className="px-4 py-4 flex-1 overflow-y-auto">

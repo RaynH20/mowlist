@@ -1,13 +1,38 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Home, Calendar, MapPin, CreditCard, Settings, LogOut, Menu, X, Plus } from 'lucide-react'
-import { useState } from 'react'
+import { Home, Calendar, MapPin, CreditCard, Settings, LogOut, Menu, X, Plus, Scissors } from 'lucide-react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../lib/auth-context'
+import { supabase } from '../lib/supabase'
 
 export default function DashboardLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const { signOut, user } = useAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [profileName, setProfileName] = useState<string | null>(null)
+  const [profileAvatar, setProfileAvatar] = useState<string | null>(null)
+
+  // Fetch the customer's name + avatar to show in the sidebar instead of
+  // a generic icon. The auth context also fetches this — but DashboardLayout
+  // needs the avatar immediately on mount for a snappy first render.
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    supabase
+      .from('customer_profiles')
+      .select('first_name, last_name, profile_image_url')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return
+        if (data) {
+          const name = `${data.first_name || ''} ${data.last_name || ''}`.trim() || null
+          setProfileName(name)
+          setProfileAvatar((data as any).profile_image_url ?? null)
+        }
+      })
+    return () => { cancelled = true }
+  }, [user])
 
   const handleSignOut = async () => {
     await signOut()
@@ -26,12 +51,31 @@ export default function DashboardLayout() {
   const sidebarContent = (
     <>
       <div className="p-6 border-b border-[#047857]">
-        <Link to="/" className="text-xl font-bold" onClick={() => setIsMobileMenuOpen(false)}>
-          <span className="text-white">Mow</span>
-          <span className="text-[#86EFAC]">List</span>
+        <Link to="/" className="flex items-center gap-2 text-xl font-bold" onClick={() => setIsMobileMenuOpen(false)}>
+          <span className="w-8 h-8 bg-[#22C55E] rounded-lg flex items-center justify-center flex-shrink-0">
+            <Scissors className="text-white" size={16} />
+          </span>
+          <span className="text-white">MowList</span>
         </Link>
-        {user?.email && (
-          <p className="text-xs text-green-100 mt-1 truncate opacity-80">{user.email}</p>
+        {(profileName || profileAvatar) && (
+          <div className="flex items-center gap-2 mt-3">
+            <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center overflow-hidden flex-shrink-0">
+              {profileAvatar ? (
+                <img
+                  src={profileAvatar}
+                  alt={profileName || ''}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-white font-semibold text-sm">
+                  {(profileName || '?').split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase()}
+                </span>
+              )}
+            </div>
+            {profileName && (
+              <p className="text-sm text-white font-medium truncate">{profileName}</p>
+            )}
+          </div>
         )}
       </div>
       {/* Book Service button - always visible, prominent */}
