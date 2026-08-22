@@ -2,12 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Calendar, Clock, MapPin, CheckCircle, ArrowRight, Scissors, Sparkles,
-  Loader2, AlertCircle, FileText, CreditCard, TrendingUp,
+  Loader2, AlertCircle,
 } from 'lucide-react'
 import { useAuth } from '../../lib/auth-context'
 import { getCustomerBookings } from '../../lib/api'
 import type { Booking } from '../../lib/database.types'
-import ProAvatar from '../../components/ProAvatar'
 
 // Friendly labels for the enum values
 const YARD_SIZE_LABELS: Record<string, string> = {
@@ -26,12 +25,11 @@ const FREQUENCY_LABELS: Record<string, string> = {
 
 const STATUS_LABELS: Record<string, string> = {
   requested: 'Requested',
-  booked: 'Awaiting Pro',
+  booked: 'Booked',
   provider_assigned: 'Pro Assigned',
   on_the_way: 'Pro On The Way',
   arrived: 'Pro Arrived',
   in_progress: 'In Progress',
-  pending_review: 'Needs Your Approval',
   completed: 'Completed',
   cancelled: 'Cancelled',
   disputed: 'Disputed',
@@ -45,7 +43,6 @@ const STATUS_COLORS: Record<string, string> = {
   on_the_way: 'bg-amber-100 text-amber-700',
   arrived: 'bg-amber-100 text-amber-700',
   in_progress: 'bg-amber-100 text-amber-700',
-  pending_review: 'bg-yellow-100 text-yellow-800',
   completed: 'bg-green-100 text-green-700',
   cancelled: 'bg-red-100 text-red-700',
   disputed: 'bg-orange-100 text-orange-700',
@@ -80,26 +77,26 @@ export default function Dashboard() {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  // First name for personalized greeting. All hooks must be declared before
-  // any early returns so React's hook order is stable.
-  const [firstName, setFirstName] = useState<string | null>(null)
 
   useEffect(() => {
     if (!user) return
 
     let cancelled = false
 
-    const fetch = async () => {
+    const fetchBookings = async () => {
       setLoading(true)
       setError(null)
       try {
-        const bookingsRes = await getCustomerBookings(user.id)
+        const { data, error: fetchError } = await getCustomerBookings(user.id)
         if (cancelled) return
-        if (bookingsRes.error) setError(bookingsRes.error.message)
-        else setBookings(bookingsRes.data || [])
+        if (fetchError) {
+          setError(fetchError.message)
+        } else {
+          setBookings(data || [])
+        }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load dashboard')
+          setError(err instanceof Error ? err.message : 'Failed to load bookings')
         }
       } finally {
         if (!cancelled) {
@@ -108,24 +105,7 @@ export default function Dashboard() {
       }
     }
 
-    fetch()
-    return () => { cancelled = true }
-  }, [user])
-
-  // Best-effort first name for the greeting
-  useEffect(() => {
-    if (!user) return
-    let cancelled = false
-    import('../../lib/supabase').then(({ supabase }) => {
-      supabase
-        .from('customer_profiles')
-        .select('first_name')
-        .eq('user_id', user.id)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (!cancelled && data?.first_name) setFirstName(data.first_name)
-        })
-    })
+    fetchBookings()
     return () => { cancelled = true }
   }, [user])
 
@@ -161,222 +141,149 @@ export default function Dashboard() {
   const upcomingBookings = bookings.filter(isUpcoming)
   const thisMonthBookings = bookings.filter(isThisMonth)
   const totalSpent = bookings.reduce((sum, b) => sum + (b.estimated_price || 0), 0)
-  const completedBookings = bookings.filter((b) => b.booking_status === 'completed')
-  const nextBooking = upcomingBookings.sort((a, b) => {
-    if (!a.scheduled_date) return 1
-    if (!b.scheduled_date) return -1
-    return a.scheduled_date.localeCompare(b.scheduled_date)
-  })[0]
-  const isFirstTime = !hasBookings
-  // Jobs the pro has finished that are sitting in the 24h review window. If the
-  // customer never opens Track Service, the payment auto-releases without them
-  // ever seeing the photos — so this gets top billing on the dashboard.
-  const awaitingApproval = bookings.filter((b) => b.booking_status === 'pending_review')
+  const stats = {
+    upcoming: upcomingBookings.length,
+    thisMonth: thisMonthBookings.length,
+    totalJobs: bookings.length,
+  }
 
   return (
     <div>
-      {/* Action needed — 24h review window is ticking */}
-      {awaitingApproval.length > 0 && (
-        <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-300 rounded-xl p-4 mb-4">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center flex-shrink-0">
-              <AlertCircle className="text-white" size={20} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h2 className="font-semibold text-amber-900">
-                {awaitingApproval.length === 1
-                  ? 'A job is waiting for your approval'
-                  : `${awaitingApproval.length} jobs are waiting for your approval`}
-              </h2>
-              <p className="text-sm text-amber-800 mt-0.5">
-                Review the photos and approve to release payment. If you don't act within
-                24 hours, payment is released automatically.
-              </p>
-              <Link
-                to={`/dashboard/track?booking=${awaitingApproval[0].id}`}
-                className="inline-flex items-center gap-1.5 mt-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-700 transition-colors"
-              >
-                Review now
-                <ArrowRight size={14} />
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
+      <h1 className="text-xl font-bold text-slate-900 mb-4">My Dashboard</h1>
 
-      {/* Greeting */}
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold text-slate-900">
-          {firstName ? `Hi ${firstName} 👋` : 'Welcome back 👋'}
-        </h1>
-        <p className="text-sm text-slate-500 mt-1">
-          {hasBookings
-            ? `You have ${upcomingBookings.length} upcoming visit${upcomingBookings.length === 1 ? '' : 's'}.`
-            : 'Ready to get your lawn taken care of?'}
-        </p>
-      </div>
-
-      {/* Stats grid */}
+      {/* Stats — only when there are bookings */}
       {hasBookings && (
         <div className="grid grid-cols-3 gap-2 mb-4">
           <div className="bg-white rounded-lg p-3 shadow-sm">
-            <div className="flex items-center gap-1.5 mb-1">
-              <Calendar size={14} className="text-[#22C55E]" />
-              <span className="text-xs text-slate-500">Upcoming</span>
-            </div>
-            <div className="text-xl font-bold text-slate-900">{upcomingBookings.length}</div>
+            <div className="text-2xl font-bold text-slate-900">{stats.upcoming}</div>
+            <div className="text-xs text-slate-500">Upcoming</div>
           </div>
           <div className="bg-white rounded-lg p-3 shadow-sm">
-            <div className="flex items-center gap-1.5 mb-1">
-              <CheckCircle size={14} className="text-[#22C55E]" />
-              <span className="text-xs text-slate-500">Completed</span>
-            </div>
-            <div className="text-xl font-bold text-slate-900">{completedBookings.length}</div>
+            <div className="text-2xl font-bold text-slate-900">${totalSpent.toFixed(0)}</div>
+            <div className="text-xs text-slate-500">Total Spent</div>
           </div>
           <div className="bg-white rounded-lg p-3 shadow-sm">
-            <div className="flex items-center gap-1.5 mb-1">
-              <TrendingUp size={14} className="text-[#22C55E]" />
-              <span className="text-xs text-slate-500">Spent</span>
-            </div>
-            <div className="text-xl font-bold text-slate-900">${totalSpent.toFixed(0)}</div>
+            <div className="text-2xl font-bold text-slate-900">{stats.totalJobs}</div>
+            <div className="text-xs text-slate-500">Total Jobs</div>
           </div>
         </div>
       )}
 
-      {/* First-time user welcome */}
-      {isFirstTime && (
-        <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-6 mb-4 text-center">
-          <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm">
-            <Sparkles className="text-[#22C55E]" size={28} />
-          </div>
-          <h2 className="text-lg font-semibold text-slate-900 mb-1">Welcome to MowList!</h2>
-          <p className="text-slate-600 text-sm mb-4 max-w-sm mx-auto">
-            Book your first lawn care visit and we'll match you with a vetted local pro.
-          </p>
-          <Link
-            to="/book"
-            className="inline-flex items-center gap-2 bg-[#22C55E] text-white px-6 py-2.5 rounded-lg font-medium hover:bg-[#16A34A] transition-colors"
-          >
-            <Scissors size={18} />
-            Book Your First Service
-          </Link>
-        </div>
-      )}
-
-      {/* Next up — featured card for the next visit */}
-      {nextBooking && (
-        <div className="bg-gradient-to-br from-[#22C55E] to-emerald-600 rounded-xl p-5 mb-4 text-white shadow-lg shadow-green-200">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs uppercase tracking-wide text-green-100 font-medium">Next Visit</span>
-            <span
-              className="text-xs bg-white/20 backdrop-blur px-2 py-0.5 rounded-full font-medium"
-            >
-              {STATUS_LABELS[nextBooking.booking_status] || 'Scheduled'}
-            </span>
-          </div>
-          <h3 className="text-xl font-bold mb-2">
-            {YARD_SIZE_LABELS[nextBooking.yard_size_category] || 'Lawn Service'}
-          </h3>
-          <div className="flex items-center gap-2 text-sm text-green-50 mb-1">
-            <Calendar size={14} />
-            <span>{formatDate(nextBooking.scheduled_date)}</span>
-            {nextBooking.scheduled_time_window && (
-              <>
-                <span className="text-green-200">•</span>
-                <Clock size={14} />
-                <span>{nextBooking.scheduled_time_window}</span>
-              </>
-            )}
-          </div>
-          <div className="flex items-center gap-2 text-sm text-green-50 mb-3">
-            <MapPin size={14} />
-            <span>Service address</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-2xl font-bold">${nextBooking.estimated_price}</span>
+      {/* Welcome card for new users */}
+      {!hasBookings && (
+        <div className="bg-white rounded-lg shadow-sm p-6 mb-4">
+          <div className="text-center">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Sparkles className="text-[#22C55E]" size={32} />
+            </div>
+            <h2 className="text-lg font-semibold text-slate-900 mb-2">Welcome to MowList!</h2>
+            <p className="text-slate-600 text-sm mb-4">
+              No services scheduled yet. Book your first lawn care visit to get started.
+            </p>
             <Link
-              to={`/dashboard/track?booking=${nextBooking.id}`}
-              className="inline-flex items-center gap-1 bg-white text-[#22C55E] px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-green-50 transition-colors"
+              to="/book"
+              className="inline-flex items-center gap-2 bg-[#22C55E] text-white px-6 py-2.5 rounded-lg font-medium hover:bg-[#16A34A] transition-colors"
             >
-              Track it
-              <ArrowRight size={14} />
+              <Scissors size={18} />
+              Book Your First Service
             </Link>
           </div>
         </div>
       )}
 
-      {/* Recent activity — last few bookings */}
-      {hasBookings && upcomingBookings.length > 0 && (
-        <div className="bg-white rounded-lg shadow-sm p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-slate-900">Coming up</h2>
+      {/* Upcoming visits list */}
+      <div className="bg-white rounded-lg shadow-sm p-4">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-slate-900">
+            {hasBookings ? 'Upcoming Visits' : 'Upcoming'}
+          </h2>
+          {hasBookings && (
             <Link to="/dashboard/services" className="text-[#22C55E] font-medium text-sm flex items-center gap-1">
               View all <ArrowRight size={14} />
             </Link>
+          )}
+        </div>
+
+        {!hasBookings ? (
+          <div className="text-center py-6">
+            <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Calendar className="text-slate-400" size={24} />
+            </div>
+            <p className="text-slate-500 text-sm">No upcoming visits</p>
+            <Link to="/book" className="text-[#22C55E] text-sm font-medium mt-2 inline-block hover:underline">
+              Schedule your first service
+            </Link>
           </div>
-          <div className="space-y-2">
-            {upcomingBookings.slice(0, 3).map((booking) => {
-              const hasPro = !!(booking as any).provider_name
-              return (
-                <Link
-                  key={booking.id}
-                  to={`/dashboard/track?booking=${booking.id}`}
-                  className="block border border-slate-200 rounded-lg p-3 hover:border-[#22C55E] hover:bg-green-50/30 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    {hasPro ? (
-                      <ProAvatar
-                        imageUrl={(booking as any).provider_image_url}
-                        name={(booking as any).provider_name}
-                        size="md"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <Scissors size={16} className="text-[#22C55E]" />
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-slate-900 text-sm truncate">
-                        {hasPro
-                          ? (booking as any).provider_name
-                          : YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {hasPro
-                          ? `${YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn'} · ${formatDate(booking.scheduled_date)}`
-                          : 'Awaiting Pro · ' + formatDate(booking.scheduled_date)}
-                      </p>
-                      {!hasPro && (
-                        <span className="text-xs text-amber-600 font-medium">Waiting for pro to accept</span>
+        ) : upcomingBookings.length === 0 ? (
+          <div className="text-center py-6">
+            <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <CheckCircle className="text-slate-400" size={24} />
+            </div>
+            <p className="text-slate-500 text-sm">No upcoming visits — all caught up!</p>
+            <Link to="/book" className="text-[#22C55E] text-sm font-medium mt-2 inline-block hover:underline">
+              Book another service
+            </Link>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {upcomingBookings.map((booking) => (
+              <div
+                key={booking.id}
+                className="border border-slate-200 rounded-lg p-3 hover:border-[#22C55E] transition-colors"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Scissors size={14} className="text-[#22C55E] flex-shrink-0" />
+                      <span className="font-medium text-slate-900 text-sm">
+                        {YARD_SIZE_LABELS[booking.yard_size_category] || 'Lawn Service'}
+                      </span>
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          STATUS_COLORS[booking.booking_status] || 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {STATUS_LABELS[booking.booking_status] || booking.booking_status}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-slate-600">
+                      <Calendar size={12} />
+                      <span>{formatDate(booking.scheduled_date)}</span>
+                      {booking.scheduled_time_window && (
+                        <>
+                          <span className="text-slate-300">•</span>
+                          <Clock size={12} />
+                          <span>{booking.scheduled_time_window}</span>
+                        </>
                       )}
                     </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-semibold text-slate-900">${booking.estimated_price}</p>
-                      <p className="text-xs text-[#22C55E] font-medium">View →</p>
+                    <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
+                      <MapPin size={12} />
+                      <span className="truncate">Service address</span>
                     </div>
                   </div>
-                </Link>
-              )
-            })}
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-lg font-bold text-slate-900">${booking.estimated_price}</div>
+                    <div className="text-xs text-slate-500">
+                      {FREQUENCY_LABELS[booking.service_frequency] || booking.service_frequency}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Quick actions row */}
-      <div className="grid grid-cols-2 gap-2 mt-4">
-        <Link to="/book" className="bg-[#22C55E] rounded-lg p-3 hover:bg-[#16A34A] transition-colors flex items-center gap-2">
-          <Scissors className="text-white" size={18} />
-          <div>
-            <div className="font-medium text-white text-sm">Book</div>
-            <div className="text-green-100 text-xs">Schedule next mow</div>
-          </div>
+      {/* Quick Actions - Always visible */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
+        <Link to="/book" className="bg-white rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+          <h3 className="font-medium text-slate-900 text-sm mb-1">Book Service</h3>
+          <p className="text-slate-500 text-xs">Schedule lawn care</p>
         </Link>
-        <Link to="/dashboard/payment" className="bg-white border border-slate-200 rounded-lg p-3 hover:border-slate-300 transition-colors flex items-center gap-2">
-          <CreditCard className="text-slate-700" size={18} />
-          <div>
-            <div className="font-medium text-slate-900 text-sm">Payment</div>
-            <div className="text-slate-500 text-xs">Manage cards</div>
-          </div>
+        <Link to="/book" className="bg-[#22C55E] rounded-lg p-4 hover:bg-[#16A34A] transition-colors">
+          <h3 className="font-medium text-white text-sm mb-1">Quick Book</h3>
+          <p className="text-green-100 text-xs">Fast scheduling</p>
         </Link>
       </div>
     </div>

@@ -15,7 +15,7 @@ export default function BookPage() {
   const { user, loading: authLoading } = useAuth()
 
   // State for saved address
-  const [savedAddress, setSavedAddress] = useState<{
+  const [savedAddress, setSavedAddress] = useState<{ß
     id: string
     street_1: string
     city: string
