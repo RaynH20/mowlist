@@ -66,89 +66,17 @@ async function verifyStripeSignature(body: string, sigHeader: string): Promise<b
 /**
  * Record the webhook event for idempotency / audit
  */
-/**
- * Collects every failed database write in one invocation.
- *
- * Supabase does NOT throw when a write is rejected — it resolves with
- * `{ data, error }`. Every write in this file discarded that result, so a
- * rejected insert produced a 200 OK, no log line, and no row. That is why the
- * payments table stayed empty with nothing at all in the logs.
- */
-function makeWriteRecorder(eventId: string) {
-  const failures: string[] = []
-  return {
-    failures,
-    check(label: string, res: any) {
-      const err = res?.error
-      if (!err) return res
-      const parts = [err.message]
-      if (err.code) parts.push(`code=${err.code}`)
-      if (err.details) parts.push(err.details)
-      if (err.hint) parts.push(`hint=${err.hint}`)
-      const msg = `${label}: ${parts.join(' | ')}`
-      console.error(`[stripe-webhook] WRITE FAILED (${eventId}) ${msg}`)
-      // 42P10 is the one that bites an upsert: ON CONFLICT names a column with
-      // no unique constraint behind it. Say so in plain language.
-      if (err.code === '42P10') {
-        console.error(
-          '[stripe-webhook] ^ the ON CONFLICT column has no UNIQUE constraint. ' +
-          'Add a unique index on payments.stripe_payment_intent_id or this ' +
-          'upsert can never succeed.'
-        )
-      }
-      failures.push(msg)
-      return res
-    },
-  }
-}
-
-/**
- * A drop-in stand-in for `supabaseAdmin` that reports failed writes to `w`.
- *
- * Rather than wrapping every call site, this patches the thenable returned by
- * insert/update/upsert/delete so that awaiting it also runs the error check.
- * Call sites stay exactly as they were.
- */
-function recordingClient(w: ReturnType<typeof makeWriteRecorder>) {
-  return {
-    from(table: string) {
-      const qb: any = supabaseAdmin.from(table)
-      for (const method of ['insert', 'update', 'upsert', 'delete'] as const) {
-        const original = qb[method].bind(qb)
-        qb[method] = (...args: any[]) => {
-          const builder: any = original(...args)
-          const originalThen = builder.then.bind(builder)
-          builder.then = (onFulfilled: any, onRejected: any) =>
-            originalThen((res: any) => {
-              w.check(`${table}.${method}`, res)
-              return onFulfilled ? onFulfilled(res) : res
-            }, onRejected)
-          return builder
-        }
-      }
-      return qb
-    },
-  }
-}
-
 async function recordEvent(eventId: string, eventType: string, payload: any): Promise<boolean> {
-  // Only skip an event we have already handled SUCCESSFULLY. Previously ANY
-  // recorded event was skipped, so once an event failed it could never be
-  // retried — not by Stripe, not by a manual resend from the dashboard.
+  // Check if already processed
   const { data: existing } = await supabaseAdmin
     .from('webhook_events')
-    .select('id, processed_at, error')
+    .select('id')
     .eq('stripe_event_id', eventId)
-    .maybeSingle()
-
-  if (existing?.processed_at && !existing.error) {
-    console.log(`Event ${eventId} already processed successfully, skipping`)
-    return false
-  }
+    .single()
 
   if (existing) {
-    console.log(`Event ${eventId} was seen before but did not succeed — retrying`)
-    return true
+    console.log(`Event ${eventId} already processed, skipping`)
+    return false
   }
 
   // Insert (with conflict handling for race conditions)
@@ -167,9 +95,7 @@ async function recordEvent(eventId: string, eventType: string, payload: any): Pr
 async function markEventProcessed(eventId: string, error?: string) {
   await supabaseAdmin
     .from('webhook_events')
-    // `error: undefined` gets dropped from the JSON body, which would leave a
-    // stale error in place on a successful retry. Send an explicit null.
-    .update({ processed_at: new Date().toISOString(), error: error ?? null })
+    .update({ processed_at: new Date().toISOString(), error })
     .eq('stripe_event_id', eventId)
 }
 
@@ -223,11 +149,6 @@ serve(async (req) => {
     })
   }
 
-  // `db` behaves exactly like supabaseAdmin, but a rejected write is logged
-  // and collected instead of silently discarded.
-  const w = makeWriteRecorder(event.id)
-  const db = recordingClient(w)
-
   try {
     // Handle specific event types
     switch (event.type) {
@@ -246,7 +167,7 @@ serve(async (req) => {
         const platformFee = platformFeeCents / 100
         const proPayout = (pi.amount - platformFeeCents) / 100
 
-        await db.from('payments').upsert(
+        await supabaseAdmin.from('payments').upsert(
           {
             booking_id: bookingId,
             customer_id: userId,
@@ -266,7 +187,7 @@ serve(async (req) => {
         )
 
         if (bookingId) {
-          await db
+          await supabaseAdmin
             .from('bookings')
             .update({
               payment_intent_id: pi.id,
@@ -317,7 +238,7 @@ serve(async (req) => {
         const proPayout = (pi.amount - platformFeeCents) / 100
 
         // Update or insert payment record
-        await db.from('payments').upsert(
+        await supabaseAdmin.from('payments').upsert(
           {
             booking_id: bookingId,
             customer_id: userId,
@@ -348,7 +269,7 @@ serve(async (req) => {
           // 'paid' is not an allowed payment_status value — this whole update
           // was being rejected by the CHECK constraint, so captured payments
           // never showed up on the booking.
-          await db
+          await supabaseAdmin
             .from('bookings')
             .update({
               payment_status: 'captured',
@@ -388,13 +309,13 @@ serve(async (req) => {
           // If this is the user's first payment method, set it as default
           if (userId) {
             try {
-              const { data: user } = await db
+              const { data: user } = await supabaseAdmin
                 .from('users')
                 .select('default_payment_method_id')
                 .eq('id', userId)
                 .single()
               if (!user?.default_payment_method_id) {
-                await db
+                await supabaseAdmin
                   .from('users')
                   .update({ default_payment_method_id: paymentMethodId })
                   .eq('id', userId)
@@ -414,7 +335,7 @@ serve(async (req) => {
         const pi = event.data.object
         const bookingId = pi.metadata?.booking_id
 
-        await db.from('payments').upsert(
+        await supabaseAdmin.from('payments').upsert(
           {
             booking_id: bookingId,
             customer_id: pi.metadata?.mowlist_user_id,
@@ -429,7 +350,7 @@ serve(async (req) => {
         )
 
         if (bookingId) {
-          await db
+          await supabaseAdmin
             .from('bookings')
             .update({ payment_status: 'failed' })
             .eq('id', bookingId)
@@ -444,20 +365,20 @@ serve(async (req) => {
         const piId = charge.payment_intent
 
         if (piId) {
-          await db
+          await supabaseAdmin
             .from('payments')
             .update({ status: 'refunded', updated_at: new Date().toISOString() })
             .eq('stripe_payment_intent_id', piId)
         }
 
         // Update booking status
-        const { data: payment } = await db
+        const { data: payment } = await supabaseAdmin
           .from('payments')
           .select('booking_id')
           .eq('stripe_payment_intent_id', piId)
           .single()
         if (payment?.booking_id) {
-          await db
+          await supabaseAdmin
             .from('bookings')
             .update({ booking_status: 'cancelled', payment_status: 'refunded' })
             .eq('id', payment.booking_id)
@@ -470,7 +391,7 @@ serve(async (req) => {
         const account = event.data.object
         const connectId = account.id
 
-        await db
+        await supabaseAdmin
           .from('provider_profiles')
           .update({
             stripe_connect_charges_enabled: account.charges_enabled || false,
@@ -492,7 +413,7 @@ serve(async (req) => {
 
         if (providerId) {
           const tier = sub.metadata?.tier || 'basic'
-          await db
+          await supabaseAdmin
             .from('provider_profiles')
             .update({
               stripe_subscription_id: sub.id,
@@ -506,21 +427,6 @@ serve(async (req) => {
 
       default:
         console.log(`Unhandled event type: ${event.type}`)
-    }
-
-    if (w.failures.length > 0) {
-      // At least one write was rejected. Record the real reason and return 500
-      // so Stripe retries, and so the failure is visible in the Stripe
-      // dashboard instead of looking like a clean delivery.
-      const summary = w.failures.join(' || ')
-      console.error(
-        `[stripe-webhook] ${event.type} finished with ${w.failures.length} failed write(s): ${summary}`
-      )
-      await markEventProcessed(event.id, summary)
-      return new Response(
-        JSON.stringify({ received: true, ok: false, errors: w.failures }),
-        { status: 500, headers: corsHeaders }
-      )
     }
 
     await markEventProcessed(event.id)
