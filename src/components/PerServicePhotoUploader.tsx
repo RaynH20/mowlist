@@ -8,6 +8,10 @@ interface PerServicePhotoUploaderProps {
   bookingId: string
   /** The addons selected for this booking (base mow is always shown) */
   selectedAddons?: Addon[]
+  /** Current booking status — drives which photo slots show. Before slots
+   * show when status is `arrived` (or earlier so the pro can prep). After
+   * slots only show when status is `in_progress` or later. */
+  bookingStatus?: string
   /** Called whenever the photos change so the parent can update its state */
   onPhotosChange?: (photos: BookingPhoto[]) => void
   /** Called after a successful upload so the parent can re-fetch the booking
@@ -43,6 +47,7 @@ const MAX_EXTRAS_PER_SERVICE = 3
 export default function PerServicePhotoUploader({
   bookingId,
   selectedAddons = [],
+  bookingStatus,
   onPhotosChange,
   onPhotoUploaded,
 }: PerServicePhotoUploaderProps) {
@@ -172,6 +177,16 @@ export default function PerServicePhotoUploader({
     )
   }
 
+  // Status-driven slot visibility:
+  //   arrived  → Before only (required to start work)
+  //   in_progress+ → After only (required to mark complete; Before was already done)
+  //   pending_review / disputed / completed → both (re-do and review scenarios)
+  //   other (provider_assigned, on_the_way, booked) → Before only (so pro can prep)
+  const showBefore = bookingStatus === undefined
+    || ['provider_assigned', 'on_the_way', 'arrived', 'pending_review', 'disputed', 'completed'].includes(bookingStatus)
+  const showAfter = bookingStatus === undefined
+    || ['in_progress', 'pending_review', 'disputed', 'completed'].includes(bookingStatus)
+
   return (
     <div className="space-y-4">
       {services.map((svc) => {
@@ -181,6 +196,20 @@ export default function PerServicePhotoUploader({
         const beforeUploading = uploading === `${svc.key}:before`
         const afterUploading = uploading === `${svc.key}:after`
         const extrasCount = svc.extras.length
+
+        // Subtitle reflects what the pro actually needs to do right now
+        let requiredText = ''
+        if (showBefore && !showAfter) {
+          requiredText = 'Required: 1 before photo'
+        } else if (!showBefore && showAfter) {
+          requiredText = 'Required: 1 after photo'
+        } else {
+          requiredText = 'Required: 1 before + 1 after'
+        }
+        if (extrasCount > 0) {
+          requiredText += ` · ${extrasCount} extra${extrasCount > 1 ? 's' : ''}`
+        }
+
         return (
           <div
             key={svc.key}
@@ -194,35 +223,36 @@ export default function PerServicePhotoUploader({
                     {svc.label}
                     {addon && <span className="text-slate-500 font-normal"> · ${addon.price}</span>}
                   </div>
-                  <div className="text-xs text-slate-500">
-                    {isBase ? 'Required: 1 before + 1 after' : 'Required: 1 before + 1 after'}
-                    {extrasCount > 0 && ` · ${extrasCount} extra${extrasCount > 1 ? 's' : ''}`}
-                  </div>
+                  <div className="text-xs text-slate-500">{requiredText}</div>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <PhotoSlot
-                role="before"
-                label="Before"
-                url={svc.before}
-                uploading={beforeUploading}
-                onCamera={() => triggerUpload(svc.key, 'before')}
-                onGallery={() => triggerGallery(svc.key, 'before')}
-                onDelete={svc.beforeRow ? () => setPhotoToDelete(svc.beforeRow!) : undefined}
-                onView={svc.before ? () => setSelectedPhoto(svc.before!) : undefined}
-              />
-              <PhotoSlot
-                role="after"
-                label="After"
-                url={svc.after}
-                uploading={afterUploading}
-                onCamera={() => triggerUpload(svc.key, 'after')}
-                onGallery={() => triggerGallery(svc.key, 'after')}
-                onDelete={svc.afterRow ? () => setPhotoToDelete(svc.afterRow!) : undefined}
-                onView={svc.after ? () => setSelectedPhoto(svc.after!) : undefined}
-              />
+            <div className={`grid gap-3 ${showBefore && showAfter ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              {showBefore && (
+                <PhotoSlot
+                  role="before"
+                  label="Before"
+                  url={svc.before}
+                  uploading={beforeUploading}
+                  onCamera={() => triggerUpload(svc.key, 'before')}
+                  onGallery={() => triggerGallery(svc.key, 'before')}
+                  onDelete={svc.beforeRow ? () => setPhotoToDelete(svc.beforeRow!) : undefined}
+                  onView={svc.before ? () => setSelectedPhoto(svc.before!) : undefined}
+                />
+              )}
+              {showAfter && (
+                <PhotoSlot
+                  role="after"
+                  label="After"
+                  url={svc.after}
+                  uploading={afterUploading}
+                  onCamera={() => triggerUpload(svc.key, 'after')}
+                  onGallery={() => triggerGallery(svc.key, 'after')}
+                  onDelete={svc.afterRow ? () => setPhotoToDelete(svc.afterRow!) : undefined}
+                  onView={svc.after ? () => setSelectedPhoto(svc.after!) : undefined}
+                />
+              )}
             </div>
 
             {/* Extras (optional context photos) */}

@@ -317,6 +317,7 @@ export default function ProJobCard({
               <PerServicePhotoUploader
                 bookingId={job.id}
                 selectedAddons={hydrateAddons((job as any).selected_addons)}
+                bookingStatus={job.booking_status}
                 onPhotoUploaded={onPhotoUploaded}
               />
             </div>
