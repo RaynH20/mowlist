@@ -16,6 +16,8 @@ import AddonBadges from '../../components/AddonBadges'
 import { formatBookingStatus, serviceTypeLabel, yardSizeLabel, serviceFrequencyLabel } from '../../lib/labels'
 import StarRating from '../../components/StarRating'
 import ReviewsList from '../../components/ReviewsList'
+import { StandbyToggle } from "../../components/pro/StandbyToggle";
+import { ProOfferModal } from "../../components/pro/ProOfferModal";
 
 export default function ProDashboard() {
   const { user } = useAuth()
@@ -89,12 +91,19 @@ export default function ProDashboard() {
 
   return (
     <div className="p-4 md:p-6 max-w-5xl mx-auto">
-      {/* Welcome */}
-      <div className="mb-6">
-        <h1 className="text-2xl md:text-3xl font-bold text-slate-900">
-          Hey, {displayName} 👋
-        </h1>
-        <p className="text-slate-500 text-sm mt-1">Here's how your work is going.</p>
+      {/* Welcome & Standby Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8 pb-6 border-b border-slate-100">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900">
+            Hey, {displayName} 👋
+          </h1>
+          <p className="text-slate-500 text-sm mt-1">Here's how your work is going.</p>
+        </div>
+        
+        {/* Real-time Uber-style standby control */}
+        <div className="flex items-center">
+          <StandbyToggle />
+        </div>
       </div>
 
       {/* Stripe Connect banner — only when not ready */}
@@ -360,6 +369,7 @@ export default function ProDashboard() {
           </div>
         </div>
       )}
+
     </div>
   )
 }
